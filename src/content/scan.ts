@@ -9,6 +9,14 @@ const STALL_LIMIT = 3;
 const MAX_ITERATIONS = 10000;
 const MAX_SPREAD = 4;
 
+/**
+ * How many turns in a row may land on a view this run has already been shown
+ * before the scan gives up. Higher than STALL_LIMIT because this catches a
+ * reader that is still moving, just not forwards, and a few wasted turns are
+ * cheaper than ending a good scan early.
+ */
+const REVISIT_LIMIT = 10;
+
 const QUALITY_MIN = .6;
 const QUALITY_MAX = .98;
 const QUALITY_DEFAULT = .88;
@@ -64,6 +72,40 @@ export function settingsFrom(options: ScanOptions | undefined): Settings {
     jitter: clampJitter(options?.jitter),
     quality: Math.min(QUALITY_MAX, Math.max(QUALITY_MIN, Number(options?.quality) || QUALITY_DEFAULT)),
     split: options?.split !== false
+  };
+}
+
+/**
+ * Watches for a reader that has stopped going anywhere new. The stall counter
+ * next to it only compares against the previous view, so it cannot see a reader
+ * that keeps changing without advancing — bouncing between the last page and a
+ * trailing blank, or looping a section. Those show up as views this run has
+ * already been given.
+ *
+ * Deliberately scoped to the run, not to the cache: resuming a part-captured
+ * book walks back over pages that are already stored, and every one of them is
+ * new to this run, so re-treading is progress and does not count here.
+ */
+export function revisitWatch(limit: number = REVISIT_LIMIT) {
+  const seen = new Set<string>();
+  let consecutive = 0;
+
+  return {
+    get revisits(): number {
+      return consecutive;
+    },
+    /** Records the view just captured. True once the run should give up. */
+    saw(primary: string): boolean {
+      // '' means the pixels could not be read, which says nothing either way.
+      if (!primary) return false;
+      if (seen.has(primary)) {
+        consecutive += 1;
+      } else {
+        consecutive = 0;
+        seen.add(primary);
+      }
+      return consecutive >= limit;
+    }
   };
 }
 
@@ -177,6 +219,7 @@ async function performScan(book: string, options: ScanOptions | undefined): Prom
   const known = new Set(meta.captures.map((capture) => capture.fingerprint).filter(Boolean));
   const startCount = meta.captures.length;
   const prober = turnProber(meta.turnStrategy);
+  const revisited = revisitWatch();
 
   let index = nextIndex(meta);
   let iterations = 0;
@@ -230,6 +273,13 @@ async function performScan(book: string, options: ScanOptions | undefined): Prom
     // not turn, so movement is decided by the hash rather than the counter.
     const moved = result.primary !== '' && result.primary !== lastView;
     if (result.primary) lastView = result.primary;
+
+    // Checked before the stall counter: a reader going in circles is still
+    // "moving", so unmoved would sit at 0 and never end the scan.
+    if (revisited.saw(result.primary)) {
+      outcome = `The reader stopped reaching new pages. ${plural(meta.captures.length, 'page')} cached.`;
+      break;
+    }
 
     unmoved = moved ? 0 : unmoved + 1;
     if (unmoved >= prober.stallBudget(STALL_LIMIT)) {

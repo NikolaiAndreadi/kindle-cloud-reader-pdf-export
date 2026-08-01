@@ -4,7 +4,9 @@ import { describe, it } from 'node:test';
 import { emptyMeta } from '../../src/shared/storage.ts';
 import { JITTER_DEFAULT } from '../../src/shared/timing.ts';
 import type { Settings } from '../../src/content/scan.ts';
-import { isRunning, prepareBookMode, retune, scan, settingsFrom } from '../../src/content/scan.ts';
+import {
+  isRunning, prepareBookMode, retune, revisitWatch, scan, settingsFrom
+} from '../../src/content/scan.ts';
 
 const capture = (): CaptureRecord => ({
   index: 1, position: '', fingerprint: 'fp-1', page: null
@@ -73,6 +75,45 @@ describe('settingsFrom', () => {
   it('pulls a delay outside the slider range back into it', () => {
     assert.equal(settingsFrom({ delay: 60000 }).delay, 2000);
     assert.equal(settingsFrom({ delay: 10 }).delay, 700);
+  });
+});
+
+describe('revisitWatch', () => {
+  it('never gives up while every view is one it has not seen', () => {
+    const watch = revisitWatch(3);
+    for (let i = 0; i < 50; i++) assert.equal(watch.saw(`view-${i}`), false);
+  });
+
+  it('gives up once the same view comes round enough times', () => {
+    const watch = revisitWatch(3);
+    assert.equal(watch.saw('a'), false);
+    assert.equal(watch.saw('a'), false);
+    assert.equal(watch.saw('a'), false);
+    assert.equal(watch.saw('a'), true);
+  });
+
+  it('catches a reader bouncing between two views, which never looks stalled', () => {
+    const watch = revisitWatch(3);
+    const seen = [];
+    for (let i = 0; i < 8; i++) seen.push(watch.saw(i % 2 ? 'a' : 'b'));
+    // b and a are new; every view after them is a repeat, so the third ends it.
+    assert.deepEqual(seen, [false, false, false, false, true, true, true, true]);
+  });
+
+  it('forgives a repeat that turns out to be a pause, not a loop', () => {
+    const watch = revisitWatch(3);
+    watch.saw('a');
+    watch.saw('a');
+    assert.equal(watch.revisits, 1);
+    watch.saw('b');
+    assert.equal(watch.revisits, 0);
+  });
+
+  it('reads nothing into a view whose pixels could not be hashed', () => {
+    const watch = revisitWatch(1);
+    assert.equal(watch.saw(''), false);
+    assert.equal(watch.saw(''), false);
+    assert.equal(watch.revisits, 0);
   });
 });
 

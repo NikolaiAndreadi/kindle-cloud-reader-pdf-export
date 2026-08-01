@@ -553,6 +553,7 @@ ${xref}
   var STALL_LIMIT = 3;
   var MAX_ITERATIONS = 1e4;
   var MAX_SPREAD = 4;
+  var REVISIT_LIMIT = 10;
   var QUALITY_MIN = 0.6;
   var QUALITY_MAX = 0.98;
   var QUALITY_DEFAULT = 0.88;
@@ -578,6 +579,26 @@ ${xref}
       jitter: clampJitter(options?.jitter),
       quality: Math.min(QUALITY_MAX, Math.max(QUALITY_MIN, Number(options?.quality) || QUALITY_DEFAULT)),
       split: options?.split !== false
+    };
+  }
+  function revisitWatch(limit = REVISIT_LIMIT) {
+    const seen = /* @__PURE__ */ new Set();
+    let consecutive = 0;
+    return {
+      get revisits() {
+        return consecutive;
+      },
+      /** Records the view just captured. True once the run should give up. */
+      saw(primary) {
+        if (!primary) return false;
+        if (seen.has(primary)) {
+          consecutive += 1;
+        } else {
+          consecutive = 0;
+          seen.add(primary);
+        }
+        return consecutive >= limit;
+      }
     };
   }
   function prepareBookMode(meta, settings) {
@@ -651,6 +672,7 @@ ${xref}
     const known = new Set(meta.captures.map((capture) => capture.fingerprint).filter(Boolean));
     const startCount = meta.captures.length;
     const prober = turnProber(meta.turnStrategy);
+    const revisited = revisitWatch();
     let index = nextIndex(meta);
     let iterations = 0;
     let unmoved = 0;
@@ -689,6 +711,10 @@ ${xref}
       if (sinceFlush >= META_FLUSH_EVERY) await flush();
       const moved = result.primary !== "" && result.primary !== lastView;
       if (result.primary) lastView = result.primary;
+      if (revisited.saw(result.primary)) {
+        outcome = `The reader stopped reaching new pages. ${plural2(meta.captures.length, "page")} cached.`;
+        break;
+      }
       unmoved = moved ? 0 : unmoved + 1;
       if (unmoved >= prober.stallBudget(STALL_LIMIT)) {
         outcome = prober.probing ? `None of the page-turn methods moved the reader. ${plural2(meta.captures.length, "page")} cached. Click once inside the book, then scan again.` : `The reader stopped advancing. ${meta.captures.length} pages cached.`;
