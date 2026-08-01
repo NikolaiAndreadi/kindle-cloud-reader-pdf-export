@@ -68,7 +68,13 @@
   };
 
   // src/popup/render.ts
+  var NOTICE_MS = 4e3;
+  var noticeUntil = 0;
   var plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  function notice(message) {
+    noticeUntil = Date.now() + NOTICE_MS;
+    ui.status.textContent = message;
+  }
   var seconds = (ms) => `${(ms / 1e3).toFixed(1)} s`;
   function showTiming() {
     const delay = Number(ui.delay.value);
@@ -102,6 +108,7 @@
   }
   function apply(state, problem) {
     const ready = state?.bookOpen === true;
+    const spoken = Date.now() < noticeUntil;
     lockBookOptions(state);
     ui.open.hidden = ready;
     ui.preview.hidden = !state?.count;
@@ -110,16 +117,17 @@
     ui.save.disabled = !state?.count;
     ui.clear.disabled = !state?.count || state.scanning;
     if (!state) {
-      ui.status.textContent = problem || "Open read.amazon.com to begin.";
+      if (!spoken) ui.status.textContent = problem || "Open read.amazon.com to begin.";
       ui.cache.textContent = "";
       return;
     }
-    ui.status.textContent = statusFor(state);
+    if (!spoken) ui.status.textContent = statusFor(state);
     ui.cache.textContent = cacheFor(state);
   }
 
   // src/popup/main.ts
   var POLL_MS = 1e3;
+  var HOLD_MS = 2e3;
   var currentBook = null;
   var uiOptions = () => ({
     delay: Number(ui.delay.value),
@@ -157,16 +165,48 @@
       apply(null, describe(error));
     }
   }
+  async function perform(run) {
+    try {
+      const message = await run();
+      if (message !== null) notice(message);
+      await refreshState();
+    } catch (error) {
+      notice(describe(error));
+    }
+  }
   function onClick(button, run) {
-    button.addEventListener("click", async () => {
-      try {
-        const message = await run();
-        if (message !== null) ui.status.textContent = message;
-        await refreshState();
-      } catch (error) {
-        ui.status.textContent = describe(error);
-      }
+    button.addEventListener("click", () => void perform(run));
+  }
+  function holdToClear(button, run) {
+    button.style.setProperty("--hold-ms", `${HOLD_MS}ms`);
+    let timer;
+    const reset = () => {
+      if (timer !== void 0) clearTimeout(timer);
+      timer = void 0;
+      button.classList.remove("holding");
+    };
+    const start = () => {
+      if (timer !== void 0 || button.disabled) return;
+      button.classList.add("holding");
+      timer = setTimeout(() => {
+        reset();
+        if (!button.disabled) void perform(run);
+      }, HOLD_MS);
+    };
+    const cancel = () => {
+      if (timer === void 0) return;
+      reset();
+      notice("Hold the button to clear this book.");
+    };
+    button.addEventListener("pointerdown", start);
+    for (const event of ["pointerup", "pointerleave", "pointercancel"]) {
+      button.addEventListener(event, cancel);
+    }
+    addEventListener("blur", cancel);
+    button.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") start();
     });
+    button.addEventListener("keyup", cancel);
   }
   onClick(ui.open, async () => {
     const tabs = await chrome.tabs.query({});
@@ -195,17 +235,14 @@
     return result.message || "Scan started. You may close this popup.";
   });
   onClick(ui.save, async () => {
-    ui.status.textContent = "Building PDF in the reader tab…";
+    notice("Building PDF in the reader tab…");
     return (await send("saveCached")).message;
   });
   onClick(ui.stop, async () => {
     await send("stopScan");
     return "Stopping after the current page…";
   });
-  onClick(ui.clear, async () => {
-    if (!confirm("Delete all captured pages stored for this book?")) return null;
-    return (await send("clearCached")).message;
-  });
+  holdToClear(ui.clear, async () => (await send("clearCached")).message);
   async function remember(pacing) {
     const options = uiOptions();
     await chrome.storage.local.set({ options });

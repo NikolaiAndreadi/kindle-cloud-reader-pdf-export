@@ -1,11 +1,14 @@
 import { READER_HOME, isReaderUrl } from '../shared/reader-hosts.ts';
 import { clampDelay, clampJitter } from '../shared/timing.ts';
 import { ui } from './elements.ts';
-import { apply, showTiming } from './render.ts';
+import { apply, notice, showTiming } from './render.ts';
 
 // A scan runs in the reader tab and the popup is a window onto it, so the
 // numbers have to arrive on their own rather than when a button is clicked.
 const POLL_MS = 1000;
+
+// How long "Clear this book" has to be held before it acts.
+const HOLD_MS = 2000;
 
 let currentBook: string | null = null;
 
@@ -58,16 +61,74 @@ async function refreshState(): Promise<void> {
   }
 }
 
+async function perform(run: () => Promise<string | null>): Promise<void> {
+  try {
+    const message = await run();
+    // Spoken, not assigned: the refresh below rewrites the status line from the
+    // state, and would erase the outcome of the action before it was read.
+    if (message !== null) notice(message);
+    await refreshState();
+  } catch (error) {
+    notice(describe(error));
+  }
+}
+
 function onClick(button: HTMLButtonElement, run: () => Promise<string | null>): void {
-  button.addEventListener('click', async () => {
-    try {
-      const message = await run();
-      if (message !== null) ui.status.textContent = message;
-      await refreshState();
-    } catch (error) {
-      ui.status.textContent = describe(error);
-    }
+  button.addEventListener('click', () => void perform(run));
+}
+
+/**
+ * Clearing is the only irreversible thing here, so it is held rather than
+ * clicked: a confirm() dialog is dismissed by reflex, and it asks the question
+ * somewhere other than where the action was taken. The button fills as it is
+ * held so the wait reads as progress rather than a dead press, and letting go
+ * early is the cancel.
+ */
+function holdToClear(button: HTMLButtonElement, run: () => Promise<string | null>): void {
+  // One source of truth for the duration: the bar's transition reads it back.
+  button.style.setProperty('--hold-ms', `${HOLD_MS}ms`);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const reset = (): void => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    // Dropping the class leaves no transition on the way back, so the bar
+    // empties at once and a cancelled hold never looks like a partial one.
+    button.classList.remove('holding');
+  };
+
+  const start = (): void => {
+    if (timer !== undefined || button.disabled) return;
+    button.classList.add('holding');
+    timer = setTimeout(() => {
+      reset();
+      // A poll may have disabled the button mid-hold, e.g. a scan just started
+      // in the reader tab. Whatever the state says now wins.
+      if (!button.disabled) void perform(run);
+    }, HOLD_MS);
+  };
+
+  const cancel = (): void => {
+    if (timer === undefined) return;
+    reset();
+    notice('Hold the button to clear this book.');
+  };
+
+  button.addEventListener('pointerdown', start);
+  // pointerup and pointerleave both end a hold: sliding off the button is the
+  // other half of how people back out of one.
+  for (const event of ['pointerup', 'pointerleave', 'pointercancel']) {
+    button.addEventListener(event, cancel);
+  }
+  // Nothing would end the hold if the popup lost focus mid-press.
+  addEventListener('blur', cancel);
+
+  // Keyboard: a button that only responds to pointers cannot be reached by one.
+  // keydown repeats while a key is held, which start() ignores anyway.
+  button.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') start();
   });
+  button.addEventListener('keyup', cancel);
 }
 
 // Prefer an existing reader tab over stacking up duplicates. Querying every tab
@@ -103,7 +164,7 @@ onClick(ui.start, async () => {
 });
 
 onClick(ui.save, async () => {
-  ui.status.textContent = 'Building PDF in the reader tab…';
+  notice('Building PDF in the reader tab…');
   return (await send('saveCached')).message;
 });
 
@@ -112,10 +173,7 @@ onClick(ui.stop, async () => {
   return 'Stopping after the current page…';
 });
 
-onClick(ui.clear, async () => {
-  if (!confirm('Delete all captured pages stored for this book?')) return null;
-  return (await send('clearCached')).message;
-});
+holdToClear(ui.clear, async () => (await send('clearCached')).message);
 
 /**
  * Every control writes through on change, so the popup reopens with what was

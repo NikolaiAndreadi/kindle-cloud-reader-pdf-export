@@ -1,7 +1,26 @@
 import { jitterCeiling } from '../shared/timing.ts';
 import { ui } from './elements.ts';
 
+// How long a message about something that just happened holds the status line
+// against the poll. Long enough to be read, short enough that the line goes
+// back to describing the reader well before anyone looks again.
+const NOTICE_MS = 4000;
+
+let noticeUntil = 0;
+
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/**
+ * Say something that happened, as opposed to what is currently true. The status
+ * line is otherwise rewritten from the state on every poll, which gave these
+ * messages a lifetime of anywhere between nothing and one tick: the hold hint
+ * appeared to blink, and the result of an action was never visible at all,
+ * because perform() sets it and then immediately refreshes.
+ */
+export function notice(message: string): void {
+  noticeUntil = Date.now() + NOTICE_MS;
+  ui.status.textContent = message;
+}
 
 const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)} s`;
 
@@ -73,6 +92,9 @@ function lockBookOptions(state: BookState | null): void {
  */
 export function apply(state: BookState | null, problem?: string): void {
   const ready = state?.bookOpen === true;
+  // Everything else here is a description of the current state and is safe to
+  // rewrite every tick. Only the status line can be holding a message.
+  const spoken = Date.now() < noticeUntil;
 
   lockBookOptions(state);
 
@@ -84,11 +106,11 @@ export function apply(state: BookState | null, problem?: string): void {
   ui.clear.disabled = !state?.count || state.scanning;
 
   if (!state) {
-    ui.status.textContent = problem || 'Open read.amazon.com to begin.';
+    if (!spoken) ui.status.textContent = problem || 'Open read.amazon.com to begin.';
     ui.cache.textContent = '';
     return;
   }
 
-  ui.status.textContent = statusFor(state);
+  if (!spoken) ui.status.textContent = statusFor(state);
   ui.cache.textContent = cacheFor(state);
 }
