@@ -1,0 +1,24 @@
+{
+  "name": "personal-cloud-reader-export",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Save rendered pages from Kindle Cloud Reader for personal offline use.",
+  "scripts": {
+    "build": "npm run typecheck && node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/unit",
+    "lint": "biome lint",
+    "lint:fix": "biome lint --write",
+    "test": "node --test \"test/unit/*.test.ts\"",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "fixture": "python3 -m http.server 8973"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.6",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^26.1.2",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.7.2"
+  }
+}
