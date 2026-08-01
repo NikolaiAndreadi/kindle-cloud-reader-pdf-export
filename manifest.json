@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Personal Cloud Reader Export",
+  "version": "0.1.0",
+  "description": "Save rendered pages from Kindle Cloud Reader for personal offline use.",
+  "permissions": [
+    "storage",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://read.amazon.com/*",
+    "https://read.amazon.ca/*",
+    "https://read.amazon.co.jp/*",
+    "https://read.amazon.co.uk/*",
+    "https://read.amazon.com.au/*",
+    "https://read.amazon.com.be/*",
+    "https://read.amazon.com.br/*",
+    "https://read.amazon.com.mx/*",
+    "https://read.amazon.com.tr/*",
+    "https://read.amazon.de/*",
+    "https://read.amazon.eg/*",
+    "https://read.amazon.es/*",
+    "https://read.amazon.fr/*",
+    "https://read.amazon.in/*",
+    "https://read.amazon.it/*",
+    "https://read.amazon.nl/*",
+    "https://read.amazon.pl/*",
+    "https://read.amazon.sa/*",
+    "https://read.amazon.se/*",
+    "https://read.amazon.sg/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Personal Cloud Reader Export"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://read.amazon.com/*",
+        "https://read.amazon.ca/*",
+        "https://read.amazon.co.jp/*",
+        "https://read.amazon.co.uk/*",
+        "https://read.amazon.com.au/*",
+        "https://read.amazon.com.be/*",
+        "https://read.amazon.com.br/*",
+        "https://read.amazon.com.mx/*",
+        "https://read.amazon.com.tr/*",
+        "https://read.amazon.de/*",
+        "https://read.amazon.eg/*",
+        "https://read.amazon.es/*",
+        "https://read.amazon.fr/*",
+        "https://read.amazon.in/*",
+        "https://read.amazon.it/*",
+        "https://read.amazon.nl/*",
+        "https://read.amazon.pl/*",
+        "https://read.amazon.sa/*",
+        "https://read.amazon.se/*",
+        "https://read.amazon.sg/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
