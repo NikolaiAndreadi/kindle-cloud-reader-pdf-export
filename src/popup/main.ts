@@ -159,8 +159,10 @@ chrome.storage.local.get('options').then(({ options }: { options?: ScanOptions }
     // by an older build cannot leave the slider showing something it cannot set.
     if (options.delay !== undefined) ui.delay.value = String(clampDelay(options.delay));
     if (options.jitter !== undefined) ui.jitter.value = String(clampJitter(options.jitter));
-    if (options.quality) ui.quality.value = String(options.quality);
-    if (options.split !== undefined) ui.split.checked = options.split;
+    // Not over a control the cache has already pinned: whichever of the two
+    // arrives second would otherwise win, and the cache is the authority.
+    if (options.quality && !ui.quality.disabled) ui.quality.value = String(options.quality);
+    if (options.split !== undefined && !ui.split.disabled) ui.split.checked = options.split;
     showTiming();
   }
 });

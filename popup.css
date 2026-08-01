@@ -16,3 +16,9 @@ button.secondary { background: #7773; color: inherit; }
 button.danger { background: #b3261e; color: #fff; }
 .cache { padding: 8px; border-radius: 6px; background: #7772; }
 .hint { opacity: .7; font-size: 12px; }
+/* The controls grey themselves out when disabled; this carries their labels. */
+#bookOptions.locked { opacity: .55; cursor: not-allowed; }
+/* A disabled control does not reliably pass hover to its ancestors, and the
+   explanation lives in the block's title, so the whole area has to be one
+   hover target. Nothing here is clickable while locked anyway. */
+#bookOptions.locked label, #bookOptions.locked select, #bookOptions.locked input { pointer-events: none; }

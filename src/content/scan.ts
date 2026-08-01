@@ -34,7 +34,8 @@ export function requestStop(): void {
   stopRequested = true;
 }
 
-interface Settings {
+/** Exported so tests can name what settingsFrom returns and retune mutates. */
+export interface Settings {
   delay: number;
   /** 0–5. How much random extra time to add on top of `delay`. */
   jitter: number;
@@ -72,18 +73,32 @@ interface ViewResult {
   stored: number;
 }
 
-/** Refuse to append captures whose page boundaries differ from the cache. */
-export function prepareSplitMode(meta: BookMeta, split: boolean): void {
+/**
+ * Reconcile the settings that belong to the whole book with what the cache was
+ * already built with. The popup disables both controls once a book has pages,
+ * so this is the backstop: it is what makes them properties of the cache rather
+ * than of the run, whatever a stale message asks for. `settings` is adjusted in
+ * place to what will actually be used.
+ */
+export function prepareBookMode(meta: BookMeta, settings: Settings): void {
   if (!meta.captures.length) {
-    meta.split = split;
+    meta.split = settings.split;
+    meta.quality = settings.quality;
     return;
   }
   if (meta.split === null) {
     throw new Error('This cache predates layout tracking. Save it or clear it before starting a new scan.');
   }
-  if (meta.split !== split) {
+  // Page boundaries decide what a capture even is, so a mismatch is refused
+  // rather than corrected: half the book would be spreads and half single pages.
+  if (meta.split !== settings.split) {
     throw new Error('The split setting differs from this cache. Clear the cached pages before changing it.');
   }
+  // Quality only makes the pages uneven, so the cache quietly wins instead of
+  // blocking a resume. A cache from before it was recorded adopts what it is
+  // given, which pins it from this scan on.
+  if (meta.quality === null) meta.quality = settings.quality;
+  else settings.quality = meta.quality;
 }
 
 /**
@@ -158,7 +173,7 @@ async function performScan(book: string, options: ScanOptions | undefined): Prom
   // Published so retune() can move the pacing under the loop while it waits.
   live = settings;
   const meta = await loadMeta(book);
-  prepareSplitMode(meta, settings.split);
+  prepareBookMode(meta, settings);
   const known = new Set(meta.captures.map((capture) => capture.fingerprint).filter(Boolean));
   const startCount = meta.captures.length;
   const prober = turnProber(meta.turnStrategy);

@@ -21,7 +21,9 @@ async function bookState(book: string): Promise<BookState> {
     total: kind === 'page' ? (meta.total ?? position?.total ?? null) : null,
     kind,
     position,
-    duplicates: countDuplicates(meta.captures)
+    duplicates: countDuplicates(meta.captures),
+    split: meta.split,
+    quality: meta.quality
   };
 }
 

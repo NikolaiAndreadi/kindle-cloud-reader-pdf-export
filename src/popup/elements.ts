@@ -13,6 +13,8 @@ export const ui = {
   jitterValue: required<HTMLOutputElement>('#jitterValue'),
   quality: required<HTMLSelectElement>('#quality'),
   split: required<HTMLInputElement>('#split'),
+  bookOptions: required<HTMLDivElement>('#bookOptions'),
+  bookNote: required<HTMLParagraphElement>('#bookNote'),
   open: required<HTMLButtonElement>('#open'),
   start: required<HTMLButtonElement>('#start'),
   stop: required<HTMLButtonElement>('#stop'),

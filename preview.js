@@ -11,6 +11,7 @@
     total: null,
     kind: null,
     split: null,
+    quality: null,
     turnStrategy: null
   });
   async function loadMeta(book2) {
@@ -20,7 +21,8 @@
     if (raw?.version === 2 && Array.isArray(raw.captures)) {
       return {
         ...raw,
-        split: typeof raw.split === "boolean" ? raw.split : null
+        split: typeof raw.split === "boolean" ? raw.split : null,
+        quality: typeof raw.quality === "number" ? raw.quality : null
       };
     }
     return emptyMeta(book2);

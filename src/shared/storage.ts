@@ -26,6 +26,7 @@ export const emptyMeta = (book: string): BookMeta => ({
   total: null,
   kind: null,
   split: null,
+  quality: null,
   turnStrategy: null
 });
 
@@ -38,7 +39,8 @@ export async function loadMeta(book: string): Promise<BookMeta> {
     // but scan.ts will not append to them without knowing their page layout.
     return {
       ...raw,
-      split: typeof raw.split === 'boolean' ? raw.split : null
+      split: typeof raw.split === 'boolean' ? raw.split : null,
+      quality: typeof raw.quality === 'number' ? raw.quality : null
     };
   }
   return emptyMeta(book);

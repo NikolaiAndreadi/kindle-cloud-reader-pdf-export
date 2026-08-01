@@ -39,6 +39,12 @@ interface BookMeta {
   kind: 'page' | 'location' | null;
   /** Split setting used to create this cache; null means legacy/unknown. */
   split: boolean | null;
+  /**
+   * JPEG quality the pages were encoded at. Fixed by the first scan so one book
+   * cannot end up holding pages encoded two ways. Null for caches written
+   * before it was recorded.
+   */
+  quality: number | null;
   /** Which page-turn strategy worked for this book, so later scans skip probing. */
   turnStrategy: string | null;
 }
@@ -131,6 +137,13 @@ interface BookState {
   position: ReaderPosition | null;
   /** Captures whose image bytes are identical to another capture. */
   duplicates: number;
+  /**
+   * What the cache has already committed to for the whole book. Null until the
+   * first scan pins it, or for a cache written before it was recorded. The
+   * popup shows these rather than the last values it was left set to.
+   */
+  split: boolean | null;
+  quality: number | null;
 }
 
 type ReaderRequest =

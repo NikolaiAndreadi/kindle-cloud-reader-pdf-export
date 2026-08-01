@@ -37,12 +37,44 @@ function cacheFor(state: BookState): string {
 }
 
 /**
+ * Quality and split are properties of a book's cache, not of one run: every
+ * page has to share them, so the first scan fixes them and only clearing the
+ * book lets them move again. Disabling the pair says so before a scan, which
+ * beats refusing one afterwards.
+ */
+function lockBookOptions(state: BookState | null): void {
+  const locked = Boolean(state?.count);
+  ui.quality.disabled = locked;
+  ui.split.disabled = locked;
+  ui.bookOptions.classList.toggle('locked', locked);
+
+  // The greyed-out block explains itself on hover. The reason only matters to
+  // someone who has just tried to change one of these, so it does not need to
+  // occupy a line of the popup for everyone else.
+  if (locked) ui.bookOptions.title = 'Available only for a new scan';
+  else ui.bookOptions.removeAttribute('title');
+  ui.bookNote.hidden = locked;
+
+  // Only once locked, and only from the cache: while they are still editable the
+  // poll would otherwise overwrite the value being chosen a second ago.
+  if (!locked || !state) return;
+  if (state.split !== null) ui.split.checked = state.split;
+  // Matched against the options rather than assigned: an older build may have
+  // stored a quality this list no longer offers, and an unknown value on a
+  // <select> selects nothing and shows the control blank.
+  const choice = [...ui.quality.options].find((option) => Number(option.value) === state.quality);
+  if (choice) ui.quality.value = choice.value;
+}
+
+/**
  * The popup reflects what the reader is actually doing: there is no point
  * telling someone to open a book when they are already reading one, and no
  * point offering a scan when nothing is rendered.
  */
 export function apply(state: BookState | null, problem?: string): void {
   const ready = state?.bookOpen === true;
+
+  lockBookOptions(state);
 
   ui.open.hidden = ready;
   ui.preview.hidden = !state?.count;

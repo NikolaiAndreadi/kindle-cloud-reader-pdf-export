@@ -12,6 +12,7 @@
     total: null,
     kind: null,
     split: null,
+    quality: null,
     turnStrategy: null
   });
   async function loadMeta(book) {
@@ -21,7 +22,8 @@
     if (raw?.version === 2 && Array.isArray(raw.captures)) {
       return {
         ...raw,
-        split: typeof raw.split === "boolean" ? raw.split : null
+        split: typeof raw.split === "boolean" ? raw.split : null,
+        quality: typeof raw.quality === "number" ? raw.quality : null
       };
     }
     return emptyMeta(book);
@@ -578,17 +580,20 @@ ${xref}
       split: options?.split !== false
     };
   }
-  function prepareSplitMode(meta, split) {
+  function prepareBookMode(meta, settings) {
     if (!meta.captures.length) {
-      meta.split = split;
+      meta.split = settings.split;
+      meta.quality = settings.quality;
       return;
     }
     if (meta.split === null) {
       throw new Error("This cache predates layout tracking. Save it or clear it before starting a new scan.");
     }
-    if (meta.split !== split) {
+    if (meta.split !== settings.split) {
       throw new Error("The split setting differs from this cache. Clear the cached pages before changing it.");
     }
+    if (meta.quality === null) meta.quality = settings.quality;
+    else settings.quality = meta.quality;
   }
   async function captureRendered(meta, candidates, known, settings, position, startIndex) {
     const key = positionKey(position);
@@ -642,7 +647,7 @@ ${xref}
     const settings = settingsFrom(options);
     live = settings;
     const meta = await loadMeta(book);
-    prepareSplitMode(meta, settings.split);
+    prepareBookMode(meta, settings);
     const known = new Set(meta.captures.map((capture) => capture.fingerprint).filter(Boolean));
     const startCount = meta.captures.length;
     const prober = turnProber(meta.turnStrategy);
@@ -744,7 +749,9 @@ ${xref}
       total: kind === "page" ? meta.total ?? position?.total ?? null : null,
       kind,
       position,
-      duplicates: countDuplicates(meta.captures)
+      duplicates: countDuplicates(meta.captures),
+      split: meta.split,
+      quality: meta.quality
     };
   }
   async function clearCached(book) {

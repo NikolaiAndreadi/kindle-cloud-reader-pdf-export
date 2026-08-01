@@ -3,32 +3,53 @@ import { describe, it } from 'node:test';
 
 import { emptyMeta } from '../../src/shared/storage.ts';
 import { JITTER_DEFAULT } from '../../src/shared/timing.ts';
-import { isRunning, prepareSplitMode, retune, scan, settingsFrom } from '../../src/content/scan.ts';
+import type { Settings } from '../../src/content/scan.ts';
+import { isRunning, prepareBookMode, retune, scan, settingsFrom } from '../../src/content/scan.ts';
 
 const capture = (): CaptureRecord => ({
   index: 1, position: '', fingerprint: 'fp-1', page: null
 });
 
-describe('prepareSplitMode', () => {
+const asked = (split: boolean, quality = .88): Settings =>
+  settingsFrom({ split, quality });
+
+describe('prepareBookMode', () => {
   it('records the mode when starting an empty cache', () => {
     const meta = emptyMeta('B001');
-    prepareSplitMode(meta, true);
+    prepareBookMode(meta, asked(true, .96));
     assert.equal(meta.split, true);
+    assert.equal(meta.quality, .96);
   });
 
   it('allows a resume with the same mode', () => {
-    const meta = { ...emptyMeta('B001'), split: false, captures: [capture()] };
-    assert.doesNotThrow(() => prepareSplitMode(meta, false));
+    const meta = { ...emptyMeta('B001'), split: false, quality: .88, captures: [capture()] };
+    assert.doesNotThrow(() => prepareBookMode(meta, asked(false)));
   });
 
   it('rejects a resume with a different mode', () => {
-    const meta = { ...emptyMeta('B001'), split: false, captures: [capture()] };
-    assert.throws(() => prepareSplitMode(meta, true), /split setting differs/i);
+    const meta = { ...emptyMeta('B001'), split: false, quality: .88, captures: [capture()] };
+    assert.throws(() => prepareBookMode(meta, asked(true)), /split setting differs/i);
   });
 
   it('rejects appending to a legacy cache whose mode is unknown', () => {
     const meta = { ...emptyMeta('B001'), captures: [capture()] };
-    assert.throws(() => prepareSplitMode(meta, true), /predates layout tracking/i);
+    assert.throws(() => prepareBookMode(meta, asked(true)), /predates layout tracking/i);
+  });
+
+  it('holds a resume to the quality the cached pages were encoded at', () => {
+    const meta = { ...emptyMeta('B001'), split: true, quality: .75, captures: [capture()] };
+    const settings = asked(true, .96);
+    prepareBookMode(meta, settings);
+    assert.equal(settings.quality, .75);
+    assert.equal(meta.quality, .75);
+  });
+
+  it('pins the requested quality on a cache written before it was recorded', () => {
+    const meta = { ...emptyMeta('B001'), split: true, captures: [capture()] };
+    const settings = asked(true, .96);
+    prepareBookMode(meta, settings);
+    assert.equal(meta.quality, .96);
+    assert.equal(settings.quality, .96);
   });
 });
 

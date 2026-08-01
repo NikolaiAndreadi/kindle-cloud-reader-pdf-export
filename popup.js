@@ -57,6 +57,8 @@
     jitterValue: required("#jitterValue"),
     quality: required("#quality"),
     split: required("#split"),
+    bookOptions: required("#bookOptions"),
+    bookNote: required("#bookNote"),
     open: required("#open"),
     start: required("#start"),
     stop: required("#stop"),
@@ -85,8 +87,22 @@
     const outOf = state.total ? ` of ~${state.total}` : "";
     return `${plural(state.count, "saved view")}${outOf}${dupes} · ${state.bookId}`;
   }
+  function lockBookOptions(state) {
+    const locked = Boolean(state?.count);
+    ui.quality.disabled = locked;
+    ui.split.disabled = locked;
+    ui.bookOptions.classList.toggle("locked", locked);
+    if (locked) ui.bookOptions.title = "Available only for a new scan";
+    else ui.bookOptions.removeAttribute("title");
+    ui.bookNote.hidden = locked;
+    if (!locked || !state) return;
+    if (state.split !== null) ui.split.checked = state.split;
+    const choice = [...ui.quality.options].find((option) => Number(option.value) === state.quality);
+    if (choice) ui.quality.value = choice.value;
+  }
   function apply(state, problem) {
     const ready = state?.bookOpen === true;
+    lockBookOptions(state);
     ui.open.hidden = ready;
     ui.preview.hidden = !state?.count;
     ui.start.disabled = !ready;
@@ -211,8 +227,8 @@
     if (options) {
       if (options.delay !== void 0) ui.delay.value = String(clampDelay(options.delay));
       if (options.jitter !== void 0) ui.jitter.value = String(clampJitter(options.jitter));
-      if (options.quality) ui.quality.value = String(options.quality);
-      if (options.split !== void 0) ui.split.checked = options.split;
+      if (options.quality && !ui.quality.disabled) ui.quality.value = String(options.quality);
+      if (options.split !== void 0 && !ui.split.disabled) ui.split.checked = options.split;
       showTiming();
     }
   });
