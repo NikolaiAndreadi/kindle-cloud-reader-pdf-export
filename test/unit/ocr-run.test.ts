@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
-import { type Recogniser, type PageWords } from '../../src/ocr/engine.ts';
-import { runOcr } from '../../src/ocr/run.ts';
+import type { PageWords, Recogniser } from '../../src/ocr/engine.ts';
+import { LANES, runOcr } from '../../src/ocr/run.ts';
 import {
   emptyMeta, loadOcrBatch, ocrKey, recognisedIndexes, saveMeta, storePage
 } from '../../src/shared/storage.ts';
@@ -44,14 +44,25 @@ async function seed(book: string, count: number): Promise<BookMeta> {
   return meta;
 }
 
-/** A recogniser that returns one word per page and counts what it was asked. */
+/**
+ * A recogniser that returns one word per page and counts what it was asked. Every
+ * lane gets the same object, so `seen` is every page the run read, by any lane.
+ */
 function fakeRecogniser(onPage?: () => Promise<void> | void) {
   const seen: string[] = [];
   let closed = false;
+  let inFlight = 0;
+  let mostInFlight = 0;
   const recogniser: Recogniser = {
     async page(dataUrl: string, width: number): Promise<PageWords> {
       seen.push(`${dataUrl.slice(-4)}@${width}`);
-      await onPage?.();
+      inFlight += 1;
+      mostInFlight = Math.max(mostInFlight, inFlight);
+      try {
+        await onPage?.();
+      } finally {
+        inFlight -= 1;
+      }
       return { words: [{ t: 'word', x0: 0, y0: 0, x1: 10, y1: 10 }], confidence: 90 };
     },
     async close(): Promise<void> {
@@ -63,6 +74,8 @@ function fakeRecogniser(onPage?: () => Promise<void> | void) {
     seen,
     get closed() { return closed; },
     get opened() { return opened; },
+    /** The most pages being read at the same moment. */
+    get mostInFlight() { return mostInFlight; },
     open: async () => {
       opened += 1;
       return recogniser;
@@ -127,7 +140,7 @@ describe('runOcr', () => {
     const result = await runOcr('B001', { ...silent, open: engine.open });
 
     assert.equal(result.recognised, 2);
-    assert.equal(engine.opened, 1, 'the engine is loaded once for the whole run');
+    assert.equal(engine.opened, LANES, 'the lanes are loaded once for the whole run');
     assert.deepEqual([...await recognisedIndexes('B001', meta.captures)], [1, 2]);
   });
 
@@ -148,7 +161,8 @@ describe('runOcr', () => {
   });
 
   it('stops between pages and leaves the rest for the next run', async () => {
-    await seed('B001', 4);
+    const pages = LANES * 4;
+    await seed('B001', pages);
     const engine = fakeRecogniser();
     let done = 0;
 
@@ -161,12 +175,39 @@ describe('runOcr', () => {
     });
 
     assert.equal(result.stopped, true);
-    assert.equal(result.recognised, 2);
+    // Not exactly 2: every lane finishes the page it holds, so a stop asked for
+    // after the second page can land up to one page per lane later. What matters
+    // is that it landed early and that nothing was lost.
+    assert.ok(result.recognised >= 2 && result.recognised < pages, `${result.recognised} pages`);
     assert.equal(engine.closed, true, 'the engine is closed even on a stop');
 
     const rest = fakeRecogniser();
     const second = await runOcr('B001', { ...silent, open: rest.open });
-    assert.equal(second.recognised, 2);
+    assert.equal(
+      result.recognised + second.recognised, pages, 'every page read exactly once across the two'
+    );
+  });
+
+  it('reads a page in every lane at once, and each page only once', async () => {
+    const pages = LANES * 3;
+    await seed('B001', pages);
+    // Each page blocks until there are as many in flight as there are lanes, so
+    // this cannot pass on the luck of the microtask ordering. Divisible by LANES,
+    // or the last round would wait for a page that is never taken on.
+    let waiting: (() => void)[] = [];
+    const engine = fakeRecogniser(() => new Promise<void>((resolve) => {
+      waiting.push(resolve);
+      if (waiting.length < LANES) return;
+      const round = waiting;
+      waiting = [];
+      for (const release of round) release();
+    }));
+
+    const result = await runOcr('B001', { ...silent, open: engine.open });
+
+    assert.equal(result.recognised, pages);
+    assert.equal(engine.mostInFlight, LANES);
+    assert.equal(engine.seen.length, pages, 'no page was handed to two lanes');
   });
 
   it('reports a total that counts the pages taken on mid-run', async () => {
@@ -190,6 +231,48 @@ describe('runOcr', () => {
 
     // The first round only knew of one page; the second counts both.
     assert.deepEqual(totals, ['1/1', '2/2']);
+  });
+
+  it('stops reporting what the engine is doing once it has loaded', async () => {
+    await seed('B001', 2);
+    let logger: ((status: string) => void) | undefined;
+    // What tesseract.js does on every page: the logger the worker was made with
+    // fires with 'recognizing text', which would otherwise land on top of the
+    // page count for the whole run.
+    const engine = fakeRecogniser(() => logger?.('recognizing text'));
+    const open = async (onLoad: (status: string) => void): Promise<Recogniser> => {
+      // Lane 0's, the only one whose messages are passed on.
+      logger ??= onLoad;
+      onLoad('loading language traineddata');
+      return engine.open();
+    };
+
+    const statuses: string[] = [];
+    await runOcr('B001', {
+      onProgress: (progress) => {
+        if (progress.status) statuses.push(progress.status);
+      },
+      shouldStop: () => false,
+      open
+    });
+
+    assert.deepEqual(statuses, ['loading the OCR engine', 'loading language traineddata']);
+  });
+
+  it('closes the lanes that did load when another fails to load', async () => {
+    await seed('B001', 1);
+    const engine = fakeRecogniser();
+    let opens = 0;
+    const open = async (): Promise<Recogniser> => {
+      opens += 1;
+      // The last lane to be asked is the one that cannot start.
+      if (opens === LANES) throw new Error('OCR engine is missing');
+      return engine.open();
+    };
+
+    await assert.rejects(runOcr('B001', { ...silent, open }), /engine is missing/);
+    assert.equal(engine.closed, true, 'the lane that did start was not left running');
+    assert.equal(engine.seen.length, 0, 'and no page was read');
   });
 
   it('closes the engine even when a page throws', async () => {

@@ -107,12 +107,18 @@ words underneath.
 
 OCR runs in the preview tab because it needs a WebAssembly engine, which an
 extension page can load and a content script cannot, and because it needs somewhere
-that stays open — roughly a second and a half a page, so ten to twenty minutes for
-a long book. That tab does not have to be the visible one. It is resumable and
-interruptible: results are stored per page as they finish, a page that already has
-words is never read twice, and closing the tab costs at most the page in flight.
-Pages with no text layer are still exported as images, so a part-finished run is
-worth having.
+that stays open — roughly a second and a half a page, so five to ten minutes for a
+long book. That tab does not have to be the visible one. Two pages are read at
+once, in two independent engines: recognising is almost entirely wasm, so a second
+lane is worth close to a second core. It is resumable and interruptible: results
+are stored per page as they finish, a page that already has words is never read
+twice, and closing the tab costs at most the pages in flight. Pages with no text
+layer are still exported as images, so a part-finished run is worth having.
+
+Nothing has to be scanned again to add text to a cache captured before OCR existed.
+The run works off the stored pages, and an OCR record is keyed by the capture's
+pixel fingerprint as well as its index, so words can never be attached to a page
+they were not read from.
 
 Accuracy comes from the pixels, so it is only as good as the capture. Kindle paints
 roughly 150–200 dpi, below where the recogniser does its best work, so a page under

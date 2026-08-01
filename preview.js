@@ -129,23 +129,21 @@
     return (x) => (baseline.y0 + slope * (x - baseline.x0)) / factor;
   }
   var asset = (name) => chrome.runtime.getURL(`vendor/tesseract/${name}`);
-  var scratch = null;
-  async function prepare(dataUrl, width, height) {
+  async function draw(canvas, dataUrl, width, height) {
     const factor = Math.min(MAX_UPSCALE, Math.max(1, TARGET_WIDTH / width));
     const blob = await fetch(dataUrl).then((response) => response.blob());
     const bitmap = await createImageBitmap(blob);
     try {
-      scratch ??= document.createElement("canvas");
-      scratch.width = Math.round(width * factor);
-      scratch.height = Math.round(height * factor);
-      const context = scratch.getContext("2d", { alpha: false });
+      canvas.width = Math.round(width * factor);
+      canvas.height = Math.round(height * factor);
+      const context = canvas.getContext("2d", { alpha: false });
       if (!context) throw new Error("Could not get a 2D context for OCR.");
       context.imageSmoothingQuality = "high";
-      context.drawImage(bitmap, 0, 0, scratch.width, scratch.height);
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     } finally {
       bitmap.close();
     }
-    return { canvas: scratch, factor };
+    return factor;
   }
   async function createRecogniser(onLoad) {
     if (typeof Tesseract === "undefined") {
@@ -169,12 +167,22 @@
     await worker.setParameters({
       tessedit_pageseg_mode: PSM_AUTO,
       // Written into the PDF text layer, where a run of words is all there is.
-      preserve_interword_spaces: "1"
+      preserve_interword_spaces: "1",
+      // Where the recogniser's own running commentary goes. Left at its default it
+      // writes to stderr, which for a wasm build means console.error in the worker,
+      // and it has two things to say about every single page: a page painted by a
+      // browser carries no resolution metadata, so it warns that the resolution is
+      // 0 dpi and then says what it estimated instead. Nothing to act on, and a
+      // book's worth of it — twice over, with two lanes — buries anything that is.
+      // /dev/null exists in the emulated filesystem; a path it cannot open would
+      // only send the output back to stderr.
+      debug_file: "/dev/null"
     });
+    const scratch = document.createElement("canvas");
     return {
       async page(dataUrl, width, height) {
-        const { canvas, factor } = await prepare(dataUrl, width, height);
-        const { data } = await worker.recognize(canvas, {}, { blocks: true, text: false });
+        const factor = await draw(scratch, dataUrl, width, height);
+        const { data } = await worker.recognize(scratch, {}, { blocks: true, text: false });
         const words = [];
         let confidence = 0;
         for (const block of data.blocks ?? []) {
@@ -214,6 +222,7 @@
   }
 
   // src/ocr/run.ts
+  var LANES = 2;
   async function pendingCaptures(book2, attempted) {
     const meta = await loadMeta(book2);
     const already = await recognisedIndexes(book2, meta.captures);
@@ -221,52 +230,81 @@
       (capture) => !already.has(capture.index) && !attempted.has(capture.index)
     );
   }
+  async function openLanes(count, open, onLoad) {
+    const started = await Promise.allSettled(
+      Array.from({ length: count }, (_, lane) => open(lane === 0 ? onLoad : () => {
+      }))
+    );
+    const ready = started.flatMap((lane) => lane.status === "fulfilled" ? [lane.value] : []);
+    const failed = started.find((lane) => lane.status === "rejected");
+    if (failed) {
+      await Promise.all(ready.map((recogniser) => recogniser.close().catch(() => {
+      })));
+      throw failed.reason;
+    }
+    return ready;
+  }
   async function runOcr(book2, options) {
     const result = { recognised: 0, skipped: 0, stopped: false };
     const attempted = /* @__PURE__ */ new Set();
     let pending = await pendingCaptures(book2, attempted);
     if (!pending.length) return result;
     options.onProgress({ done: 0, total: pending.length, status: "loading the OCR engine" });
-    const recogniser = await (options.open ?? createRecogniser)((status) => {
-      options.onProgress({ done: 0, total: pending.length, status });
+    let loading = true;
+    const recognisers = await openLanes(LANES, options.open ?? createRecogniser, (status) => {
+      if (loading) options.onProgress({ done: 0, total: pending.length, status });
     });
+    loading = false;
+    let failure;
     try {
-      while (pending.length && !result.stopped) {
+      while (pending.length && !result.stopped && !failure) {
         const total2 = result.recognised + result.skipped + pending.length;
         for await (const batch of pagesInBatches(book2, pending)) {
-          if (result.stopped) break;
-          for (const { capture, page } of batch) {
-            if (options.shouldStop()) {
-              result.stopped = true;
-              break;
+          if (result.stopped || failure) break;
+          let cursor = 0;
+          await Promise.all(recognisers.map(async (recogniser) => {
+            while (cursor < batch.length && !result.stopped && !failure) {
+              if (options.shouldStop()) {
+                result.stopped = true;
+                return;
+              }
+              const item = batch[cursor++];
+              if (!item) break;
+              const { capture, page } = item;
+              attempted.add(capture.index);
+              if (!page?.dataUrl || !page.width || !page.height) {
+                result.skipped += 1;
+                continue;
+              }
+              try {
+                const { words, confidence } = await recogniser.page(page.dataUrl, page.width, page.height);
+                await storeOcr(book2, capture, {
+                  index: capture.index,
+                  width: page.width,
+                  height: page.height,
+                  words,
+                  confidence
+                });
+              } catch (error) {
+                failure ??= error;
+                return;
+              }
+              result.recognised += 1;
+              options.onProgress({
+                done: result.recognised + result.skipped,
+                total: total2,
+                index: capture.index
+              });
             }
-            attempted.add(capture.index);
-            if (!page?.dataUrl || !page.width || !page.height) {
-              result.skipped += 1;
-              continue;
-            }
-            const { words, confidence } = await recogniser.page(page.dataUrl, page.width, page.height);
-            await storeOcr(book2, capture, {
-              index: capture.index,
-              width: page.width,
-              height: page.height,
-              words,
-              confidence
-            });
-            result.recognised += 1;
-            options.onProgress({
-              done: result.recognised + result.skipped,
-              total: total2,
-              index: capture.index
-            });
-          }
+          }));
         }
-        if (result.stopped) break;
+        if (result.stopped || failure) break;
         pending = await pendingCaptures(book2, attempted);
       }
     } finally {
-      await recogniser.close();
+      await Promise.all(recognisers.map((recogniser) => recogniser.close()));
     }
+    if (failure) throw failure;
     return result;
   }
 

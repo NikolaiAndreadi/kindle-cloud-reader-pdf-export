@@ -25,7 +25,10 @@
 
   The worker options in ocr-fixture.js are a copy of the ones in engine.ts (this
   page is served over http, where chrome.runtime.getURL does not exist). If you
-  change them there, change them here.
+  change them there, change them here. One deliberate difference: engine.ts sends
+  the recogniser's commentary to /dev/null and this page does not, because a bad
+  vendor drop is exactly the case where you want to read it. Two lines per page
+  about the resolution of a browser-painted bitmap are expected here.
 
   The script is a separate file rather than inline for the same reason
   preview.js is: an extension page's CSP forbids inline scripts, and a fixture

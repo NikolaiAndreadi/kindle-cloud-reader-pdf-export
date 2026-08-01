@@ -68,15 +68,20 @@ export interface PageWords {
 }
 
 /**
- * A canvas holding the page, upscaled if it is small. Reused across pages: one
- * canvas per page of a 400-page book is a lot of garbage, and the OCR worker is
- * the only thing waiting on it.
+ * Draw the page onto `canvas`, upscaled if it is small, and return the factor it
+ * was scaled by.
+ *
+ * The canvas belongs to one recogniser and is reused for every page that
+ * recogniser reads: one canvas per page of a 400-page book is a lot of garbage,
+ * and its own worker is the only thing waiting on it. It must not be shared
+ * between recognisers — tesseract.js reads a canvas argument with toBlob(), which
+ * lands a tick or more after recognize() is called, so a second recogniser
+ * redrawing the same canvas in the meantime would be recognised in place of the
+ * first one's page.
  */
-let scratch: HTMLCanvasElement | null = null;
-
-async function prepare(dataUrl: string, width: number, height: number): Promise<{
-  canvas: HTMLCanvasElement; factor: number;
-}> {
+async function draw(
+  canvas: HTMLCanvasElement, dataUrl: string, width: number, height: number
+): Promise<number> {
   const factor = Math.min(MAX_UPSCALE, Math.max(1, TARGET_WIDTH / width));
 
   // createImageBitmap, not an <img> with decode(): a background tab never paints,
@@ -87,22 +92,23 @@ async function prepare(dataUrl: string, width: number, height: number): Promise<
   const bitmap = await createImageBitmap(blob);
 
   try {
-    scratch ??= document.createElement('canvas');
-    scratch.width = Math.round(width * factor);
-    scratch.height = Math.round(height * factor);
-    const context = scratch.getContext('2d', { alpha: false });
+    canvas.width = Math.round(width * factor);
+    canvas.height = Math.round(height * factor);
+    const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('Could not get a 2D context for OCR.');
     context.imageSmoothingQuality = 'high';
-    context.drawImage(bitmap, 0, 0, scratch.width, scratch.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   } finally {
     bitmap.close();
   }
-  return { canvas: scratch, factor };
+  return factor;
 }
 
 /**
  * Start one recogniser. Loading the core and the language data takes a few
- * seconds, so a run creates this once and feeds every page through it.
+ * seconds, so a run creates one of these per lane and feeds many pages through
+ * each. Two recognisers are two independent Tesseract workers and share nothing —
+ * see draw() for the one piece of state that used to be common to both.
  */
 export async function createRecogniser(onLoad?: (status: string) => void): Promise<Recogniser> {
   if (typeof Tesseract === 'undefined') {
@@ -128,13 +134,24 @@ export async function createRecogniser(onLoad?: (status: string) => void): Promi
   await worker.setParameters({
     tessedit_pageseg_mode: PSM_AUTO,
     // Written into the PDF text layer, where a run of words is all there is.
-    preserve_interword_spaces: '1'
+    preserve_interword_spaces: '1',
+    // Where the recogniser's own running commentary goes. Left at its default it
+    // writes to stderr, which for a wasm build means console.error in the worker,
+    // and it has two things to say about every single page: a page painted by a
+    // browser carries no resolution metadata, so it warns that the resolution is
+    // 0 dpi and then says what it estimated instead. Nothing to act on, and a
+    // book's worth of it — twice over, with two lanes — buries anything that is.
+    // /dev/null exists in the emulated filesystem; a path it cannot open would
+    // only send the output back to stderr.
+    debug_file: '/dev/null'
   });
+
+  const scratch = document.createElement('canvas');
 
   return {
     async page(dataUrl: string, width: number, height: number): Promise<PageWords> {
-      const { canvas, factor } = await prepare(dataUrl, width, height);
-      const { data } = await worker.recognize(canvas, {}, { blocks: true, text: false });
+      const factor = await draw(scratch, dataUrl, width, height);
+      const { data } = await worker.recognize(scratch, {}, { blocks: true, text: false });
 
       const words: OcrWord[] = [];
       let confidence = 0;
