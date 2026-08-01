@@ -18,12 +18,12 @@ export function showTiming(): void {
     : 'off';
 }
 
+// Deliberately says nothing about where the reader is: the counter it comes
+// from is repaginated for the window size, so "page 39 of 329" is a different
+// page 39 at a different zoom and reads as precision the number does not have.
 function statusFor(state: BookState): string {
   if (state.scanning) return 'Scanning — watch the banner in the reader tab.';
   if (!state.bookOpen) return 'No book is open in this tab. Open one, then scan.';
-  if (state.position) {
-    return `Ready · reader at ${state.position.kind} ${state.position.value} of ${state.position.total}.`;
-  }
   return 'Ready to scan.';
 }
 

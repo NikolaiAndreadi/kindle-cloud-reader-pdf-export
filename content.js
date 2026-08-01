@@ -559,9 +559,16 @@ ${xref}
   var plural2 = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   var running = false;
   var stopRequested = false;
+  var live = null;
   var isRunning = () => running;
   function requestStop() {
     stopRequested = true;
+  }
+  function retune(options) {
+    if (!live) return false;
+    if (options?.delay !== void 0) live.delay = clampDelay(options.delay);
+    if (options?.jitter !== void 0) live.jitter = clampJitter(options.jitter);
+    return true;
   }
   function settingsFrom(options) {
     return {
@@ -633,6 +640,7 @@ ${xref}
   }
   async function performScan(book, options) {
     const settings = settingsFrom(options);
+    live = settings;
     const meta = await loadMeta(book);
     prepareSplitMode(meta, settings.split);
     const known = new Set(meta.captures.map((capture) => capture.fingerprint).filter(Boolean));
@@ -688,10 +696,9 @@ ${xref}
           await flush();
         }
       }
-      const where = position ? ` · reader at ${position.kind} ${position.value} of ${position.total}` : "";
       const skipped = result.stored === 0 ? " · nothing new on this view" : "";
       const outOf = meta.kind === "page" && meta.total ? ` of ~${meta.total}` : "";
-      notify(`Cached ${meta.captures.length}${outOf} pages${where}${skipped}`);
+      notify(`Cached ${meta.captures.length}${outOf} pages${skipped}`);
       if (position && position.value >= position.total) break;
       const tried = prober.turn();
       if (!tried) {
@@ -719,6 +726,7 @@ ${xref}
       await performScan(book, options);
     } finally {
       running = false;
+      live = null;
     }
   }
 
@@ -760,6 +768,11 @@ ${xref}
     switch (request.action) {
       case "startScan":
         sendResponse(startScan(book, request.options));
+        return false;
+      case "retune":
+        sendResponse({
+          message: retune(request.options) ? "Pacing updated." : "No scan is running."
+        });
         return false;
       case "stopScan":
         requestStop();

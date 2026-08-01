@@ -77,9 +77,6 @@
   function statusFor(state) {
     if (state.scanning) return "Scanning — watch the banner in the reader tab.";
     if (!state.bookOpen) return "No book is open in this tab. Open one, then scan.";
-    if (state.position) {
-      return `Ready · reader at ${state.position.kind} ${state.position.value} of ${state.position.total}.`;
-    }
     return "Ready to scan.";
   }
   function cacheFor(state) {
@@ -106,7 +103,14 @@
   }
 
   // src/popup/main.ts
+  var POLL_MS = 1e3;
   var currentBook = null;
+  var uiOptions = () => ({
+    delay: Number(ui.delay.value),
+    jitter: Number(ui.jitter.value),
+    quality: Number(ui.quality.value),
+    split: ui.split.checked
+  });
   async function activeTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     return tab;
@@ -169,12 +173,7 @@
     return null;
   });
   onClick(ui.start, async () => {
-    const options = {
-      delay: Number(ui.delay.value),
-      jitter: Number(ui.jitter.value),
-      quality: Number(ui.quality.value),
-      split: ui.split.checked
-    };
+    const options = uiOptions();
     await chrome.storage.local.set({ options });
     const result = await send("startScan", { options });
     return result.message || "Scan started. You may close this popup.";
@@ -191,8 +190,21 @@
     if (!confirm("Delete all captured pages stored for this book?")) return null;
     return (await send("clearCached")).message;
   });
+  async function remember(pacing) {
+    const options = uiOptions();
+    await chrome.storage.local.set({ options });
+    if (!pacing) return;
+    try {
+      await send("retune", { options });
+    } catch {
+    }
+  }
+  for (const control of [ui.quality, ui.split]) {
+    control.addEventListener("change", () => void remember(false));
+  }
   for (const slider of [ui.delay, ui.jitter]) {
     slider.addEventListener("input", showTiming);
+    slider.addEventListener("change", () => void remember(true));
   }
   showTiming();
   chrome.storage.local.get("options").then(({ options }) => {
@@ -205,4 +217,12 @@
     }
   });
   void refreshState();
+  var polling = false;
+  setInterval(() => {
+    if (polling) return;
+    polling = true;
+    void refreshState().finally(() => {
+      polling = false;
+    });
+  }, POLL_MS);
 })();

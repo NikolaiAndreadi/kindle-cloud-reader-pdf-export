@@ -24,6 +24,10 @@ const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' 
 let running = false;
 let stopRequested = false;
 
+// The settings the running scan is reading, so the pacing controls can be
+// retuned without stopping it. Null whenever no scan is in flight.
+let live: Settings | null = null;
+
 export const isRunning = (): boolean => running;
 
 export function requestStop(): void {
@@ -36,6 +40,21 @@ interface Settings {
   jitter: number;
   quality: number;
   split: boolean;
+}
+
+/**
+ * Re-pace the scan that is already running, from the next wait onwards. Only
+ * the two timing controls move: quality would leave one book holding pages
+ * encoded two ways, and split decides the page boundaries the cache is keyed
+ * on. Returns false when there was nothing to retune.
+ */
+export function retune(options: ScanOptions | undefined): boolean {
+  if (!live) return false;
+  // Each field is applied only when it was actually sent, so a partial message
+  // cannot silently reset the other control to its default.
+  if (options?.delay !== undefined) live.delay = clampDelay(options.delay);
+  if (options?.jitter !== undefined) live.jitter = clampJitter(options.jitter);
+  return true;
 }
 
 export function settingsFrom(options: ScanOptions | undefined): Settings {
@@ -136,6 +155,8 @@ async function captureRendered(
 
 async function performScan(book: string, options: ScanOptions | undefined): Promise<void> {
   const settings = settingsFrom(options);
+  // Published so retune() can move the pacing under the loop while it waits.
+  live = settings;
   const meta = await loadMeta(book);
   prepareSplitMode(meta, settings.split);
   const known = new Set(meta.captures.map((capture) => capture.fingerprint).filter(Boolean));
@@ -211,11 +232,12 @@ async function performScan(book: string, options: ScanOptions | undefined): Prom
       }
     }
 
-    const where = position ? ` · reader at ${position.kind} ${position.value} of ${position.total}` : '';
     const skipped = result.stored === 0 ? ' · nothing new on this view' : '';
-    // Only a page counter gives a meaningful "of N pages".
+    // Only a page counter gives a meaningful "of N pages", and even that is
+    // approximate: the reader repaginates for the window size, so the number it
+    // reports is not a fixed property of the book.
     const outOf = meta.kind === 'page' && meta.total ? ` of ~${meta.total}` : '';
-    notify(`Cached ${meta.captures.length}${outOf} pages${where}${skipped}`);
+    notify(`Cached ${meta.captures.length}${outOf} pages${skipped}`);
 
     if (position && position.value >= position.total) break;
 
@@ -252,5 +274,6 @@ export async function scan(book: string, options: ScanOptions | undefined): Prom
     // Storage and DOM operations can reject. Never make a transient failure
     // permanently block scan, clear, and retry until the reader tab is reloaded.
     running = false;
+    live = null;
   }
 }

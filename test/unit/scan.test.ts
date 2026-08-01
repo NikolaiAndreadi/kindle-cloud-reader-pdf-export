@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { emptyMeta } from '../../src/shared/storage.ts';
 import { JITTER_DEFAULT } from '../../src/shared/timing.ts';
-import { isRunning, prepareSplitMode, scan, settingsFrom } from '../../src/content/scan.ts';
+import { isRunning, prepareSplitMode, retune, scan, settingsFrom } from '../../src/content/scan.ts';
 
 const capture = (): CaptureRecord => ({
   index: 1, position: '', fingerprint: 'fp-1', page: null
@@ -55,6 +55,14 @@ describe('settingsFrom', () => {
   });
 });
 
+describe('retune', () => {
+  // The applied path needs a scan mid-loop, which needs a rendered page: it is
+  // covered by the fixture rather than here.
+  it('reports nothing to retune while no scan is running', () => {
+    assert.equal(retune({ delay: 1500, jitter: 4 }), false);
+  });
+});
+
 describe('scan lifecycle', () => {
   it('resets running after storage rejects', async () => {
     (globalThis as { chrome?: unknown }).chrome = {
@@ -63,5 +71,8 @@ describe('scan lifecycle', () => {
 
     await assert.rejects(scan('B001', undefined), /storage unavailable/);
     assert.equal(isRunning(), false);
+    // The settings the loop was reading are released too, so a late slider
+    // message cannot mutate the finished scan's object.
+    assert.equal(retune({ delay: 1500 }), false);
   });
 });

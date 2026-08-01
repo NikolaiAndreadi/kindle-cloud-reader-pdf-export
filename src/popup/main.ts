@@ -3,7 +3,18 @@ import { clampDelay, clampJitter } from '../shared/timing.ts';
 import { ui } from './elements.ts';
 import { apply, showTiming } from './render.ts';
 
+// A scan runs in the reader tab and the popup is a window onto it, so the
+// numbers have to arrive on their own rather than when a button is clicked.
+const POLL_MS = 1000;
+
 let currentBook: string | null = null;
+
+const uiOptions = (): ScanOptions => ({
+  delay: Number(ui.delay.value),
+  jitter: Number(ui.jitter.value),
+  quality: Number(ui.quality.value),
+  split: ui.split.checked
+});
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -85,12 +96,7 @@ onClick(ui.preview, async () => {
 });
 
 onClick(ui.start, async () => {
-  const options: ScanOptions = {
-    delay: Number(ui.delay.value),
-    jitter: Number(ui.jitter.value),
-    quality: Number(ui.quality.value),
-    split: ui.split.checked
-  };
+  const options = uiOptions();
   await chrome.storage.local.set({ options });
   const result = await send('startScan', { options });
   return result.message || 'Scan started. You may close this popup.';
@@ -111,8 +117,36 @@ onClick(ui.clear, async () => {
   return (await send('clearCached')).message;
 });
 
+/**
+ * Every control writes through on change, so the popup reopens with what was
+ * left set rather than the markup defaults. Starting a scan is no longer the
+ * only thing that saves them.
+ *
+ * The pacing pair is also pushed to a scan already in flight: the settings used
+ * to be read once at startup, so a scan turning out too fast could not be
+ * slowed without stopping and resuming it.
+ */
+async function remember(pacing: boolean): Promise<void> {
+  const options = uiOptions();
+  await chrome.storage.local.set({ options });
+  if (!pacing) return;
+  try {
+    await send('retune', { options });
+  } catch {
+    // No reader tab, or nothing running. Either way the values are saved and
+    // the next scan starts with them, so this is not worth reporting.
+  }
+}
+
+for (const control of [ui.quality, ui.split]) {
+  control.addEventListener('change', () => void remember(false));
+}
+
 for (const slider of [ui.delay, ui.jitter]) {
+  // input for the label so it tracks the thumb, change for the write so a drag
+  // is one save and one message rather than one per pixel.
   slider.addEventListener('input', showTiming);
+  slider.addEventListener('change', () => void remember(true));
 }
 
 // Label the markup defaults first: the stored options arrive a tick later, and
@@ -132,3 +166,15 @@ chrome.storage.local.get('options').then(({ options }: { options?: ScanOptions }
 });
 
 void refreshState();
+
+// Chrome destroys the popup when it closes, so this interval lives exactly as
+// long as the window it updates — there is nothing to tear down. Skipped while
+// a request is still out so a slow reader tab cannot queue them up.
+let polling = false;
+setInterval(() => {
+  if (polling) return;
+  polling = true;
+  void refreshState().finally(() => {
+    polling = false;
+  });
+}, POLL_MS);

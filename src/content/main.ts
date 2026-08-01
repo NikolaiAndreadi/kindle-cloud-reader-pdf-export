@@ -2,7 +2,7 @@ import { clearBook, countDuplicates, loadMeta } from '../shared/storage.ts';
 import { saveCachedPdf } from '../pdf/export.ts';
 import { bookId, pageCandidates, readerPosition } from './dom.ts';
 import { notify, removeNoticeLater } from './notice.ts';
-import { isRunning, requestStop, scan } from './scan.ts';
+import { isRunning, requestStop, retune, scan } from './scan.ts';
 
 async function bookState(book: string): Promise<BookState> {
   const meta = await loadMeta(book);
@@ -53,6 +53,12 @@ chrome.runtime.onMessage.addListener((
   switch (request.action) {
     case 'startScan':
       sendResponse(startScan(book, request.options));
+      return false;
+
+    case 'retune':
+      sendResponse({
+        message: retune(request.options) ? 'Pacing updated.' : 'No scan is running.'
+      });
       return false;
 
     case 'stopScan':

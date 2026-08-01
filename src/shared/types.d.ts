@@ -135,6 +135,7 @@ interface BookState {
 
 type ReaderRequest =
   | { action: 'startScan'; options?: ScanOptions }
+  | { action: 'retune'; options?: ScanOptions }
   | { action: 'stopScan' }
   | { action: 'getState' }
   | { action: 'saveCached' }
@@ -154,6 +155,7 @@ interface ReaderFailure {
 /** Reply type for each action, so callers know what they get back. */
 interface ReaderReplies {
   startScan: ReaderMessage;
+  retune: ReaderMessage;
   stopScan: ReaderMessage;
   getState: BookState;
   saveCached: ReaderMessage;
