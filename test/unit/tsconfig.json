@@ -1,0 +1,11 @@
+{
+  // The tests run under Node, the extension does not. Keeping them in their own
+  // project is what stops a src module from quietly reaching for a Node API
+  // that would not exist in Chrome.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["chrome", "node"],
+    "noUnusedLocals": false
+  },
+  "include": [".", "../../src"]
+}

@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["chrome"],
+
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    // esbuild does the emitting; tsc is only the typechecker. That is also what
+    // lets imports carry a .ts extension, which is what Node's native type
+    // stripping needs so the unit tests can import source modules directly.
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+
+    // Node's type stripping cannot handle enum / namespace / parameter
+    // properties, so the compiler rejects them here rather than at test time.
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src"]
+}

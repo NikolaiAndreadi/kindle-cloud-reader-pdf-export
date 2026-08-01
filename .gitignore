@@ -1,0 +1,8 @@
+node_modules/
+*.tsbuildinfo
+.idea
+
+# content.js, popup.js and preview.js are build output, but they are
+# deliberately NOT ignored: Chrome loads them straight from this directory, so
+# keeping them checked in means "Load unpacked" works without a build first.
+# Run `npm run build` before committing a change to src/.
