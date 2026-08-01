@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
 import {
-  clearBook, countDuplicates, deleteCapture, emptyMeta, fingerprintCounts, loadMeta, metaKey,
-  nextIndex, pageKey, pagesInBatches, reorderCaptures, saveMeta, storePage
+  clearBook, countDuplicates, deleteCapture, emptyMeta, fingerprintCounts, loadMeta, loadOcrBatch,
+  metaKey, nextIndex, ocrKey, ocrKeyParts, pageKey, pagesInBatches, recognisedIndexes,
+  reorderCaptures, saveMeta, storeOcr, storePage
 } from '../../src/shared/storage.ts';
 
 /** Just enough of chrome.storage.local to exercise the module. */
@@ -33,6 +34,14 @@ const capture = (index: number, fingerprint = `fp-${index}`): CaptureRecord =>
   ({ index, position: '', fingerprint, page: null });
 
 const image = (): CapturedPage => ({ width: 800, height: 1200, dataUrl: 'data:image/jpeg;base64,AA==' });
+
+const ocr = (index: number, words = 1): StoredOcr => ({
+  index,
+  width: 800,
+  height: 1200,
+  words: Array.from({ length: words }, (_, i) => ({ t: `w${i}`, x0: i, y0: 0, x1: i + 5, y1: 10 })),
+  confidence: 90
+});
 
 let data: Map<string, unknown>;
 beforeEach(() => {
@@ -130,6 +139,104 @@ describe('storePage', () => {
   });
 });
 
+describe('OCR records', () => {
+  it('keys by book and capture, apart from the page itself', () => {
+    assert.notEqual(ocrKey('B001', 1, 'fp'), ocrKey('B002', 1, 'fp'));
+    assert.notEqual(ocrKey('B001', 1, 'fp'), pageKey('B001', 1));
+  });
+
+  it('keys by capture identity, so one index can hold two different captures', () => {
+    assert.notEqual(ocrKey('B001', 1, 'fp-a'), ocrKey('B001', 1, 'fp-b'));
+  });
+
+  it('reads back the words for the captures asked for', async () => {
+    await storeOcr('B001', capture(1), ocr(1, 2));
+    await storeOcr('B001', capture(3), ocr(3, 1));
+
+    const found = await loadOcrBatch('B001', [capture(1), capture(2), capture(3)]);
+    assert.deepEqual([...found.keys()], [1, 3]);
+    assert.equal(found.get(1)!.words.length, 2);
+    assert.equal(found.get(2), undefined);
+  });
+
+  it('counts a page with no words as recognised, so it is not tried forever', async () => {
+    await storeOcr('B001', capture(1), ocr(1, 0));
+    const found = await loadOcrBatch('B001', [capture(1)]);
+    assert.deepEqual(found.get(1)!.words, []);
+    assert.deepEqual(
+      [...await recognisedIndexes('B001', [capture(1)])], [1]
+    );
+  });
+
+  it('reports which captures have a text layer, ignoring other books', async () => {
+    await storeOcr('B001', capture(2), ocr(2));
+    await storeOcr('B002', capture(1), ocr(1));
+
+    const found = await recognisedIndexes('B001', [capture(1), capture(2), capture(3)]);
+    assert.deepEqual([...found].sort(), [2]);
+  });
+
+  it('ignores an OCR record whose capture is no longer in the index', async () => {
+    await storeOcr('B001', capture(9), ocr(9));
+    assert.equal((await recognisedIndexes('B001', [capture(1)])).size, 0);
+  });
+
+  /**
+   * The whole reason identity is in the key. Deleting the newest capture frees
+   * its index, the next scan hands that index to a different page, and every page
+   * of a book is the same size — so a record found by index alone would be drawn
+   * onto a page it was never read from.
+   */
+  it('does not hand a reused index the words of the capture it replaced', async () => {
+    const old = capture(4, 'fp-old');
+    await storeOcr('B001', old, ocr(4));
+    assert.equal((await loadOcrBatch('B001', [old])).size, 1);
+
+    const reused = capture(4, 'fp-new');
+    assert.equal((await loadOcrBatch('B001', [reused])).size, 0);
+    assert.equal((await recognisedIndexes('B001', [reused])).size, 0);
+  });
+
+  it('does not count a stale record on the getKeys-less path either', async () => {
+    await storeOcr('B001', capture(4, 'fp-old'), ocr(4));
+    const local = (globalThis as { chrome: { storage: { local: { getKeys?: unknown } } } })
+      .chrome.storage.local;
+    const original = local.getKeys;
+    local.getKeys = undefined;
+    try {
+      assert.equal((await recognisedIndexes('B001', [capture(4, 'fp-new')])).size, 0);
+    } finally {
+      local.getKeys = original;
+    }
+  });
+
+  it('counts by key when getKeys is missing, which is the older-Chrome path', async () => {
+    await storeOcr('B001', capture(2), ocr(2));
+    const local = (globalThis as { chrome: { storage: { local: { getKeys?: unknown } } } })
+      .chrome.storage.local;
+    const original = local.getKeys;
+    local.getKeys = undefined;
+    try {
+      // Batch size 1, so the fallback has to stitch several reads together.
+      const found = await recognisedIndexes('B001', [capture(1), capture(2)], 1);
+      assert.deepEqual([...found], [2]);
+    } finally {
+      local.getKeys = original;
+    }
+  });
+
+  it('reads the index and fingerprint back out of a key', () => {
+    assert.deepEqual(ocrKeyParts('B001', ocrKey('B001', 42, 'fp-x')), {
+      index: 42, fingerprint: 'fp-x'
+    });
+    assert.equal(ocrKeyParts('B001', pageKey('B001', 42)), null);
+    assert.equal(ocrKeyParts('B001', ocrKey('B002', 42, 'fp')), null);
+    assert.equal(ocrKeyParts('B001', metaKey('B001')), null);
+    // A key from before identity was part of it has no fingerprint field.
+    assert.equal(ocrKeyParts('B001', 'book:B001:ocr:000042'), null);
+  });
+});
+
 describe('pagesInBatches', () => {
   it('yields every capture, in order, across batch boundaries', async () => {
     const meta = emptyMeta('B001');
@@ -216,6 +323,16 @@ describe('deleteCapture', () => {
     assert.ok(data.has(pageKey('B001', 3)));
   });
 
+  it('takes the text layer with the page, not leaving words behind', async () => {
+    await seed('B001', 2);
+    await storeOcr('B001', capture(1), ocr(1));
+    await storeOcr('B001', capture(2), ocr(2));
+
+    await deleteCapture('B001', 1);
+    assert.equal(data.has(ocrKey('B001', 1, 'fp-1')), false);
+    assert.ok(data.has(ocrKey('B001', 2, 'fp-2')));
+  });
+
   it('leaves the index unchanged when the capture is already gone', async () => {
     await seed('B001', 2);
     assert.deepEqual(order(await deleteCapture('B001', 9)), [1, 2]);
@@ -236,6 +353,16 @@ describe('clearBook', () => {
     await saveMeta(meta);
 
     assert.equal(await clearBook('B001'), 3);
+    assert.equal(data.size, 0);
+  });
+
+  it('removes the text layers too, and still counts only pages', async () => {
+    const meta = emptyMeta('B001');
+    for (const i of [1, 2]) await storePage(meta, capture(i), image());
+    await saveMeta(meta);
+    for (const i of [1, 2]) await storeOcr('B001', capture(i), ocr(i));
+
+    assert.equal(await clearBook('B001'), 2);
     assert.equal(data.size, 0);
   });
 

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cloud Reader Export — OCR fixture</title>
+<style>
+  body { margin: 0; font: 13px/1.5 system-ui, sans-serif; background: #2a2a2a; color: #eee; }
+  main { display: flex; gap: 20px; padding: 20px; align-items: flex-start; }
+  canvas { background: #fff; width: 420px; height: auto; }
+  .panel { flex: 1; min-width: 0; }
+  button { font: inherit; padding: 6px 12px; }
+  pre { background: #111; padding: 10px; border-radius: 6px; max-height: 60vh; overflow: auto; font-size: 12px; }
+  .ok { color: #7ddc7d; }
+  .bad { color: #ff8b7d; }
+</style>
+</head>
+<body>
+<!--
+  Checks the vendored OCR engine end to end without Chrome having to load the
+  extension: same files, same worker options as src/ocr/engine.ts, on a page of
+  known text. Run `npm run fixture` and open
+  http://localhost:8973/test/ocr-fixture.html — then compare what came back with
+  what was drawn. Worth doing after every `npm run vendor`, since a version bump
+  can rename the core build or move the language data.
+
+  The worker options in ocr-fixture.js are a copy of the ones in engine.ts (this
+  page is served over http, where chrome.runtime.getURL does not exist). If you
+  change them there, change them here.
+
+  The script is a separate file rather than inline for the same reason
+  preview.js is: an extension page's CSP forbids inline scripts, and a fixture
+  that only works without one would prove less than it appears to.
+-->
+<main>
+  <canvas id="page" width="1240" height="1750"></canvas>
+  <div class="panel">
+    <p><button id="run" type="button">Recognise the page</button> <span id="status">idle</span></p>
+    <pre id="out"></pre>
+  </div>
+</main>
+
+<script src="../vendor/tesseract/tesseract.min.js"></script>
+<script src="ocr-fixture.js"></script>
+</body>
+</html>
