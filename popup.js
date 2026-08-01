@@ -26,6 +26,22 @@
   var READER_HOME = "https://read.amazon.com/";
   var isReaderUrl = (url) => !!url && READER_HOSTS.some((host) => url.startsWith(`https://${host}/`));
 
+  // src/shared/timing.ts
+  var DELAY_MIN = 700;
+  var DELAY_MAX = 2e3;
+  var DELAY_DEFAULT = 1100;
+  var JITTER_MIN = 0;
+  var JITTER_MAX = 5;
+  var JITTER_DEFAULT = 2;
+  var JITTER_SHARE = 0.2;
+  var clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+  var clampDelay = (ms) => clamp(Number(ms) || DELAY_DEFAULT, DELAY_MIN, DELAY_MAX);
+  function clampJitter(level) {
+    const value = Number(level);
+    return Number.isFinite(value) ? clamp(Math.round(value), JITTER_MIN, JITTER_MAX) : JITTER_DEFAULT;
+  }
+  var jitterCeiling = (base, level) => Math.round(base * (1 + JITTER_SHARE * level));
+
   // src/popup/elements.ts
   function required(selector) {
     const node = document.querySelector(selector);
@@ -37,6 +53,9 @@
     cache: required("#cache"),
     layout: required("#layout"),
     delay: required("#delay"),
+    delayValue: required("#delayValue"),
+    jitter: required("#jitter"),
+    jitterValue: required("#jitterValue"),
     quality: required("#quality"),
     split: required("#split"),
     open: required("#open"),
@@ -49,6 +68,13 @@
 
   // src/popup/render.ts
   var plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  var seconds = (ms) => `${(ms / 1e3).toFixed(1)} s`;
+  function showTiming() {
+    const delay = Number(ui.delay.value);
+    const jitter = Number(ui.jitter.value);
+    ui.delayValue.textContent = seconds(delay);
+    ui.jitterValue.textContent = jitter ? `${seconds(delay)}–${seconds(jitterCeiling(delay, jitter))}` : "off";
+  }
   function statusFor(state) {
     if (state.scanning) return "Scanning — watch the banner in the reader tab.";
     if (!state.bookOpen) return "No book is open in this tab. Open one, then scan.";
@@ -152,6 +178,7 @@
   onClick(ui.start, async () => {
     const options = {
       delay: Number(ui.delay.value),
+      jitter: Number(ui.jitter.value),
       quality: Number(ui.quality.value),
       split: ui.split.checked
     };
@@ -172,11 +199,18 @@
     return (await send("clearCached")).message;
   });
   ui.split.addEventListener("change", () => void refreshState());
+  for (const slider of [ui.delay, ui.jitter]) {
+    slider.addEventListener("input", showTiming);
+  }
+  showTiming();
   chrome.storage.local.get("options").then(({ options }) => {
-    if (!options) return;
-    if (options.delay) ui.delay.value = String(options.delay);
-    if (options.quality) ui.quality.value = String(options.quality);
-    if (options.split !== void 0) ui.split.checked = options.split;
+    if (options) {
+      if (options.delay !== void 0) ui.delay.value = String(clampDelay(options.delay));
+      if (options.jitter !== void 0) ui.jitter.value = String(clampJitter(options.jitter));
+      if (options.quality) ui.quality.value = String(options.quality);
+      if (options.split !== void 0) ui.split.checked = options.split;
+      showTiming();
+    }
   });
   void refreshState();
 })();

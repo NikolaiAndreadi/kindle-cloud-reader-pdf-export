@@ -101,7 +101,13 @@ interface PdfBuilder {
 }
 
 interface ScanOptions {
+  /** Base wait around a page turn, in milliseconds. */
   delay?: number;
+  /**
+   * 0–5. How much random extra time to add to each wait, so a scan does not
+   * turn pages on a metronome. 0 keeps the base delay exactly.
+   */
+  jitter?: number;
   quality?: number;
   /**
    * Cut a landscape capture down the middle into two portrait pages. The reader

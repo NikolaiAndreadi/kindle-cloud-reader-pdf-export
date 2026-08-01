@@ -1,4 +1,5 @@
 import { META_FLUSH_EVERY, loadMeta, nextIndex, saveMeta, storePage } from '../shared/storage.ts';
+import { clampDelay, clampJitter, jitteredDelay } from '../shared/timing.ts';
 import { bookId, pageCandidates, positionKey, readerPosition } from './dom.ts';
 import { fingerprintOf, renderRegion, viewsOf } from './capture.ts';
 import { notify, removeNoticeLater } from './notice.ts';
@@ -8,8 +9,6 @@ const STALL_LIMIT = 3;
 const MAX_ITERATIONS = 10000;
 const MAX_SPREAD = 4;
 
-const DELAY_MIN = 400;
-const DELAY_DEFAULT = 1100;
 const QUALITY_MIN = .6;
 const QUALITY_MAX = .98;
 const QUALITY_DEFAULT = .88;
@@ -33,13 +32,16 @@ export function requestStop(): void {
 
 interface Settings {
   delay: number;
+  /** 0–5. How much random extra time to add on top of `delay`. */
+  jitter: number;
   quality: number;
   split: boolean;
 }
 
-function settingsFrom(options: ScanOptions | undefined): Settings {
+export function settingsFrom(options: ScanOptions | undefined): Settings {
   return {
-    delay: Math.max(DELAY_MIN, Number(options?.delay) || DELAY_DEFAULT),
+    delay: clampDelay(options?.delay),
+    jitter: clampJitter(options?.jitter),
     quality: Math.min(QUALITY_MAX, Math.max(QUALITY_MIN, Number(options?.quality) || QUALITY_DEFAULT)),
     split: options?.split !== false
   };
@@ -154,7 +156,7 @@ async function performScan(book: string, options: ScanOptions | undefined): Prom
 
   while (!stopRequested && iterations < MAX_ITERATIONS) {
     iterations += 1;
-    await wait(Math.round(settings.delay * SETTLE_RATIO));
+    await wait(jitteredDelay(settings.delay * SETTLE_RATIO, settings.jitter));
 
     if (bookId() !== book) {
       outcome = `The reader moved to another book. ${meta.captures.length} pages stay cached.`;
@@ -223,7 +225,7 @@ async function performScan(book: string, options: ScanOptions | undefined): Prom
       break;
     }
     if (prober.probing) notify(`Trying page turn: ${tried}…`);
-    await wait(settings.delay);
+    await wait(jitteredDelay(settings.delay, settings.jitter));
   }
 
   if (!outcome && iterations >= MAX_ITERATIONS) {

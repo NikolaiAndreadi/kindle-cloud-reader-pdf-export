@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { emptyMeta } from '../../src/shared/storage.ts';
-import { isRunning, prepareSplitMode, scan } from '../../src/content/scan.ts';
+import { JITTER_DEFAULT } from '../../src/shared/timing.ts';
+import { isRunning, prepareSplitMode, scan, settingsFrom } from '../../src/content/scan.ts';
 
 const capture = (): CaptureRecord => ({
   index: 1, position: '', fingerprint: 'fp-1', page: null
@@ -28,6 +29,29 @@ describe('prepareSplitMode', () => {
   it('rejects appending to a legacy cache whose mode is unknown', () => {
     const meta = { ...emptyMeta('B001'), captures: [capture()] };
     assert.throws(() => prepareSplitMode(meta, true), /predates layout tracking/i);
+  });
+});
+
+describe('settingsFrom', () => {
+  it('takes the pacing the popup sent', () => {
+    const settings = settingsFrom({ delay: 1500, jitter: 4, quality: .9, split: false });
+    assert.equal(settings.delay, 1500);
+    assert.equal(settings.jitter, 4);
+  });
+
+  it('holds jitter off when the popup asked for none', () => {
+    assert.equal(settingsFrom({ delay: 900, jitter: 0 }).jitter, 0);
+  });
+
+  it('applies defaults to a request that predates the sliders', () => {
+    const settings = settingsFrom({ quality: .88 });
+    assert.equal(settings.jitter, JITTER_DEFAULT);
+    assert.ok(settings.delay >= 700);
+  });
+
+  it('pulls a delay outside the slider range back into it', () => {
+    assert.equal(settingsFrom({ delay: 60000 }).delay, 2000);
+    assert.equal(settingsFrom({ delay: 10 }).delay, 700);
   });
 });
 

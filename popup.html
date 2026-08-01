@@ -10,13 +10,15 @@
     <main>
       <h1>Cloud Reader Export</h1>
       <p id="status">Open a book and start scanning.</p>
-      <label>
-        Page delay
-        <select id="delay">
-          <option value="700">Fast (0.7 s)</option>
-          <option value="1100" selected>Normal (1.1 s)</option>
-          <option value="1800">Slow (1.8 s)</option>
-        </select>
+      <label class="slider">
+        <span>Page delay <output id="delayValue" for="delay">1.1 s</output></span>
+        <!-- step 100 so every stop has its own label: at 50 both 1.35 s and
+             1.4 s would read "1.4 s". -->
+        <input type="range" id="delay" min="700" max="2000" step="100" value="1100">
+      </label>
+      <label class="slider">
+        <span>Delay jitter <output id="jitterValue" for="jitter delay">off</output></span>
+        <input type="range" id="jitter" min="0" max="5" step="1" value="2">
       </label>
       <label>
         JPEG quality

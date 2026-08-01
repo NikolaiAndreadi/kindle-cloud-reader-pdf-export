@@ -1,6 +1,22 @@
+import { jitterCeiling } from '../shared/timing.ts';
 import { ui } from './elements.ts';
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)} s`;
+
+/**
+ * Label the pacing sliders. Jitter is a bare 0–5 level, which means nothing on
+ * its own, so it is shown as the range of waits it produces at the chosen delay.
+ */
+export function showTiming(): void {
+  const delay = Number(ui.delay.value);
+  const jitter = Number(ui.jitter.value);
+  ui.delayValue.textContent = seconds(delay);
+  ui.jitterValue.textContent = jitter
+    ? `${seconds(delay)}–${seconds(jitterCeiling(delay, jitter))}`
+    : 'off';
+}
 
 function statusFor(state: BookState): string {
   if (state.scanning) return 'Scanning — watch the banner in the reader tab.';

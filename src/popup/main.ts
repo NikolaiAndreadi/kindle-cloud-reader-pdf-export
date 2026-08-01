@@ -1,6 +1,7 @@
 import { READER_HOME, isReaderUrl } from '../shared/reader-hosts.ts';
+import { clampDelay, clampJitter } from '../shared/timing.ts';
 import { ui } from './elements.ts';
-import { apply } from './render.ts';
+import { apply, showTiming } from './render.ts';
 
 let currentBook: string | null = null;
 
@@ -86,6 +87,7 @@ onClick(ui.preview, async () => {
 onClick(ui.start, async () => {
   const options: ScanOptions = {
     delay: Number(ui.delay.value),
+    jitter: Number(ui.jitter.value),
     quality: Number(ui.quality.value),
     split: ui.split.checked
   };
@@ -111,11 +113,24 @@ onClick(ui.clear, async () => {
 
 ui.split.addEventListener('change', () => void refreshState());
 
+for (const slider of [ui.delay, ui.jitter]) {
+  slider.addEventListener('input', showTiming);
+}
+
+// Label the markup defaults first: the stored options arrive a tick later, and
+// a popup that opens showing no timing at all reads as broken.
+showTiming();
+
 chrome.storage.local.get('options').then(({ options }: { options?: ScanOptions }) => {
-  if (!options) return;
-  if (options.delay) ui.delay.value = String(options.delay);
-  if (options.quality) ui.quality.value = String(options.quality);
-  if (options.split !== undefined) ui.split.checked = options.split;
+  if (options) {
+    // Clamped on the way in as well as in the content script, so a value saved
+    // by an older build cannot leave the slider showing something it cannot set.
+    if (options.delay !== undefined) ui.delay.value = String(clampDelay(options.delay));
+    if (options.jitter !== undefined) ui.jitter.value = String(clampJitter(options.jitter));
+    if (options.quality) ui.quality.value = String(options.quality);
+    if (options.split !== undefined) ui.split.checked = options.split;
+    showTiming();
+  }
 });
 
 void refreshState();

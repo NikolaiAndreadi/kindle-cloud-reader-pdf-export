@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 
 import { READER_HOSTS, matchPattern } from './src/shared/reader-hosts.ts';
+import {
+  DELAY_DEFAULT, DELAY_MAX, DELAY_MIN, JITTER_DEFAULT, JITTER_MAX, JITTER_MIN
+} from './src/shared/timing.ts';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const watch = process.argv.includes('--watch');
@@ -53,6 +56,38 @@ async function verifyManifest() {
   }
 }
 
+/**
+ * popup.html cannot import the pacing bounds either, and a slider whose range
+ * disagrees with the clamp in the content script silently ignores part of
+ * itself. Cheaper to fail the build than to notice a delay that does nothing.
+ */
+async function verifySliders() {
+  const html = await readFile(resolve(root, 'popup.html'), 'utf8');
+  const expected = {
+    delay: { min: DELAY_MIN, max: DELAY_MAX, value: DELAY_DEFAULT },
+    jitter: { min: JITTER_MIN, max: JITTER_MAX, value: JITTER_DEFAULT }
+  };
+
+  const problems = [];
+  for (const [id, bounds] of Object.entries(expected)) {
+    const tag = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0];
+    if (!tag) {
+      problems.push(`popup.html has no <input id="${id}">`);
+      continue;
+    }
+    for (const [attribute, want] of Object.entries(bounds)) {
+      const got = tag.match(new RegExp(`${attribute}="([^"]*)"`))?.[1];
+      if (Number(got) !== want) {
+        problems.push(`#${id} ${attribute} is ${got ?? 'missing'}, expected ${want}`);
+      }
+    }
+  }
+
+  if (problems.length) {
+    throw new Error(`popup.html is out of sync with src/shared/timing.ts:\n  ${problems.join('\n  ')}`);
+  }
+}
+
 const options = {
   absWorkingDir: root,
   bundle: true,
@@ -71,6 +106,7 @@ const options = {
 };
 
 await verifyManifest();
+await verifySliders();
 
 const builds = Object.entries(ENTRIES).map(([outfile, entry]) => ({
   ...options,

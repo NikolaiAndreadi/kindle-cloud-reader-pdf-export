@@ -432,6 +432,22 @@ ${xref}
     return { width: sw, height: sh, dataUrl: canvas.toDataURL("image/jpeg", quality) };
   }
 
+  // src/shared/timing.ts
+  var DELAY_MIN = 700;
+  var DELAY_MAX = 2e3;
+  var DELAY_DEFAULT = 1100;
+  var JITTER_MIN = 0;
+  var JITTER_MAX = 5;
+  var JITTER_DEFAULT = 2;
+  var JITTER_SHARE = 0.2;
+  var clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+  var clampDelay = (ms) => clamp(Number(ms) || DELAY_DEFAULT, DELAY_MIN, DELAY_MAX);
+  function clampJitter(level) {
+    const value = Number(level);
+    return Number.isFinite(value) ? clamp(Math.round(value), JITTER_MIN, JITTER_MAX) : JITTER_DEFAULT;
+  }
+  var jitteredDelay = (base, level, roll = Math.random()) => Math.round(base * (1 + JITTER_SHARE * level * roll));
+
   // src/content/turning.ts
   function sendArrowRight(target) {
     for (const type of ["keydown", "keypress", "keyup"]) {
@@ -535,8 +551,6 @@ ${xref}
   var STALL_LIMIT = 3;
   var MAX_ITERATIONS = 1e4;
   var MAX_SPREAD = 4;
-  var DELAY_MIN = 400;
-  var DELAY_DEFAULT = 1100;
   var QUALITY_MIN = 0.6;
   var QUALITY_MAX = 0.98;
   var QUALITY_DEFAULT = 0.88;
@@ -551,7 +565,8 @@ ${xref}
   }
   function settingsFrom(options) {
     return {
-      delay: Math.max(DELAY_MIN, Number(options?.delay) || DELAY_DEFAULT),
+      delay: clampDelay(options?.delay),
+      jitter: clampJitter(options?.jitter),
       quality: Math.min(QUALITY_MAX, Math.max(QUALITY_MIN, Number(options?.quality) || QUALITY_DEFAULT)),
       split: options?.split !== false
     };
@@ -635,7 +650,7 @@ ${xref}
     };
     while (!stopRequested && iterations < MAX_ITERATIONS) {
       iterations += 1;
-      await wait2(Math.round(settings.delay * SETTLE_RATIO));
+      await wait2(jitteredDelay(settings.delay * SETTLE_RATIO, settings.jitter));
       if (bookId() !== book) {
         outcome = `The reader moved to another book. ${meta.captures.length} pages stay cached.`;
         break;
@@ -684,7 +699,7 @@ ${xref}
         break;
       }
       if (prober.probing) notify(`Trying page turn: ${tried}…`);
-      await wait2(settings.delay);
+      await wait2(jitteredDelay(settings.delay, settings.jitter));
     }
     if (!outcome && iterations >= MAX_ITERATIONS) {
       outcome = `Stopped after ${MAX_ITERATIONS} iterations · ${meta.captures.length} pages cached.`;

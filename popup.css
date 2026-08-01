@@ -6,6 +6,10 @@ label { display: grid; gap: 4px; margin: 12px 0; }
 label.check { display: flex; align-items: center; gap: 7px; margin: 12px 0 6px; }
 label.check input { margin: 0; }
 select, button { font: inherit; padding: 8px; }
+label.slider { gap: 2px; margin: 10px 0; }
+label.slider span { display: flex; justify-content: space-between; gap: 8px; }
+label.slider output { opacity: .7; font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; margin: 0; accent-color: #ff9900; }
 .actions { display: grid; gap: 8px; margin-top: 16px; }
 button { border: 0; border-radius: 6px; background: #ff9900; color: #161616; font-weight: 650; cursor: pointer; }
 button.secondary { background: #7773; color: inherit; }

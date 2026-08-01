@@ -112,7 +112,9 @@ function show(value) { log.textContent = typeof value === 'string' ? value : JSO
 for (const button of document.querySelectorAll('.panel button[data-action]')) {
   button.addEventListener('click', () => {
     const action = button.dataset.action;
-    const request = action === 'startScan' ? { action, options: { delay: 500, quality: .88 } } : { action };
+    const request = action === 'startScan'
+      ? { action, options: { delay: 700, jitter: 0, quality: .88 } }
+      : { action };
     listeners[0](request, null, (response) => show(response));
   });
 }
