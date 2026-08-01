@@ -1,5 +1,3 @@
-// Asking the reader tabs whether a scan is in flight.
-//
 // A running scan holds the book's index in memory and flushes it every so
 // often, so anything another page writes to that index in the meantime is
 // overwritten by the next flush. Pages that edit the index — currently only the
@@ -21,8 +19,6 @@ async function askTab(id: number): Promise<BookState | null> {
 }
 
 /**
- * True when some reader tab is scanning this book right now.
- *
  * Every reader tab is asked, not just the active one: the preview grid is
  * itself the active tab whenever it is being used, and the scan it must not
  * collide with is by definition running somewhere else. Querying all tabs needs
@@ -31,7 +27,9 @@ async function askTab(id: number): Promise<BookState | null> {
  */
 export async function scanRunning(book: string): Promise<boolean> {
   const tabs = await chrome.tabs.query({});
-  const readers = tabs.filter((tab) => tab.id !== undefined && isReaderUrl(tab.url));
-  const states = await Promise.all(readers.map((tab) => askTab(tab.id as number)));
+  const readerIds = tabs.flatMap((tab) =>
+    tab.id !== undefined && isReaderUrl(tab.url) ? [tab.id] : []
+  );
+  const states = await Promise.all(readerIds.map(askTab));
   return states.some((state) => state?.scanning && state.bookId === book);
 }

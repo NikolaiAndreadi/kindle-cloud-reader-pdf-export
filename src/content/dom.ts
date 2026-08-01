@@ -27,8 +27,6 @@ export function bookId(): string {
   return (asin || url.pathname.replace(/\W+/g, '-')).slice(0, 80);
 }
 
-// Kindle renders into shadow roots and same-origin iframes depending on the
-// build, so every lookup walks those too instead of assuming a flat document.
 function collectRoots(): SearchRoot[] {
   const found: SearchRoot[] = [];
   const visit = (root: SearchRoot, depth: number): void => {
@@ -104,14 +102,10 @@ function searchCounter(rootList: SearchRoot[]): ReaderPosition | null {
 export const positionKey = (position: ReaderPosition | null): string =>
   position ? `${position.kind}:${position.value}` : '';
 
-// Only elements close in area to the largest candidate count, and they are
-// ordered by screen position rather than height: spread pages sit in a flex
-// row, so left-to-right is the reading order.
-export function pageCandidates(): PageCandidate[] {
-  let elements = [...document.querySelectorAll<PageElement>(PAGE_SELECTOR)];
-  if (!elements.length) {
-    elements = collectRoots().flatMap((root) => [...root.querySelectorAll<PageElement>(PAGE_FALLBACK_SELECTOR)]);
-  }
+// Only elements close in area to the largest survive, and they are ordered by
+// screen position rather than by size: spread pages sit in a flex row, so
+// left-to-right is the reading order.
+function visibleCandidates(elements: PageElement[]): PageCandidate[] {
   const candidates: PageCandidate[] = [];
   for (const element of elements) {
     const rect = element.getBoundingClientRect();
@@ -124,4 +118,24 @@ export function pageCandidates(): PageCandidate[] {
   return candidates
     .filter((candidate) => candidate.area >= largest * DOMINANT_AREA_RATIO)
     .sort((a, b) => (a.rect.left - b.rect.left) || (a.rect.top - b.rect.top));
+}
+
+/**
+ * Kindle renders into shadow roots and same-origin iframes depending on the
+ * build, so a flat document query is only the fast path. collectRoots() walks
+ * every element hunting for those roots, which is worth doing only once the
+ * cheap query has come back empty — and re-covers the document on the way.
+ */
+export function pageCandidates(): PageCandidate[] {
+  const direct = visibleCandidates([...document.querySelectorAll<PageElement>(PAGE_SELECTOR)]);
+  if (direct.length) return direct;
+
+  const roots = collectRoots();
+  for (const selector of [PAGE_SELECTOR, PAGE_FALLBACK_SELECTOR]) {
+    const found = visibleCandidates(
+      roots.flatMap((root) => [...root.querySelectorAll<PageElement>(selector)])
+    );
+    if (found.length) return found;
+  }
+  return [];
 }

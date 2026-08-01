@@ -1,10 +1,10 @@
-// Page geometry. Nothing here writes PDF syntax — it only answers "how big is
-// the page and where on it does the bitmap go", which is the part worth testing.
+// Page geometry, in PDF points (1/72"). Nothing here writes PDF syntax — it
+// only answers "how big is the page and where on it does the bitmap go".
 
 /** Width every native-sized page is scaled to. US Letter width, historically. */
 export const NATIVE_POINTS_WIDE = 612;
 
-/** Sizes in PDF points (1/72"), portrait. */
+/** Portrait. */
 export const PAPER_SIZES = {
   a4: { width: 595.28, height: 841.89 },
   letter: { width: 612, height: 792 }
@@ -21,15 +21,13 @@ export const paperLabel = (paper: PaperName): string =>
   paper === 'a4' ? 'A4' : paper === 'letter' ? 'US Letter' : 'capture size';
 
 /**
- * Where one captured bitmap sits on one PDF page.
- *
  * A fixed paper size is the point of the exercise: page height used to follow
  * whatever the reader viewport happened to be, so a book exported as a stack of
  * pages no printer or e-reader had a name for. The bitmap is fitted inside the
  * sheet and centred, which leaves bands wherever the aspect ratios disagree —
  * Kindle pages are a little squarer than A4.
  *
- * The sheet takes the orientation of the bitmap. A two-column spread captured
+ * The sheet takes the orientation of the bitmap: a two-column spread captured
  * without splitting is landscape, and forcing it onto portrait A4 would waste
  * half the sheet and leave the text too small to read.
  */

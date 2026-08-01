@@ -20,6 +20,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 const watch = process.argv.includes('--watch');
 
 const ENTRIES = {
+  'background.js': 'src/background/main.ts',
   'content.js': 'src/content/main.ts',
   'popup.js': 'src/popup/main.ts',
   'preview.js': 'src/preview/main.ts'
@@ -46,11 +47,14 @@ async function verifyManifest() {
     if (extra.length) problems.push(`${label} has unknown entries: ${extra.join(', ')}`);
   }
 
-  const scripts = Object.keys(ENTRIES).filter((name) => name !== 'popup.js' && name !== 'preview.js');
+  const scripts = ['content.js'];
   for (const name of scripts) {
     if (!manifest.content_scripts?.[0]?.js?.includes(name)) {
       problems.push(`content_scripts[0].js does not load ${name}`);
     }
+  }
+  if (manifest.background?.service_worker !== 'background.js') {
+    problems.push('background.service_worker does not load background.js');
   }
 
   if (problems.length) {

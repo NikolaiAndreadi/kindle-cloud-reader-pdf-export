@@ -101,14 +101,38 @@
     return pages.length;
   }
   function countDuplicates(captures) {
-    const seen = /* @__PURE__ */ new Set();
     let duplicates = 0;
-    for (const capture of captures) {
-      if (!capture.fingerprint) continue;
-      if (seen.has(capture.fingerprint)) duplicates += 1;
-      seen.add(capture.fingerprint);
-    }
+    for (const count of fingerprintCounts(captures).values()) duplicates += count - 1;
     return duplicates;
+  }
+  function fingerprintCounts(captures) {
+    const counts = /* @__PURE__ */ new Map();
+    for (const capture of captures) {
+      if (capture.fingerprint) counts.set(capture.fingerprint, (counts.get(capture.fingerprint) || 0) + 1);
+    }
+    return counts;
+  }
+
+  // src/shared/scan-lock.ts
+  async function acquireBookScan(book, token) {
+    try {
+      const reply = await chrome.runtime.sendMessage({
+        action: "acquireScanLock",
+        book,
+        token
+      });
+      return reply?.acquired ?? true;
+    } catch (error) {
+      console.warn("Could not reach the scan lock — scanning without it", error);
+      return true;
+    }
+  }
+  async function releaseBookScan(book, token) {
+    await chrome.runtime.sendMessage({
+      action: "releaseScanLock",
+      book,
+      token
+    });
   }
 
   // src/content/notice.ts
@@ -618,11 +642,7 @@ ${xref}
     return null;
   }
   var positionKey = (position) => position ? `${position.kind}:${position.value}` : "";
-  function pageCandidates() {
-    let elements = [...document.querySelectorAll(PAGE_SELECTOR)];
-    if (!elements.length) {
-      elements = collectRoots().flatMap((root) => [...root.querySelectorAll(PAGE_FALLBACK_SELECTOR)]);
-    }
+  function visibleCandidates(elements) {
     const candidates = [];
     for (const element of elements) {
       const rect = element.getBoundingClientRect();
@@ -633,6 +653,18 @@ ${xref}
     if (!candidates.length) return [];
     const largest = Math.max(...candidates.map((candidate) => candidate.area));
     return candidates.filter((candidate) => candidate.area >= largest * DOMINANT_AREA_RATIO).sort((a, b) => a.rect.left - b.rect.left || a.rect.top - b.rect.top);
+  }
+  function pageCandidates() {
+    const direct = visibleCandidates([...document.querySelectorAll(PAGE_SELECTOR)]);
+    if (direct.length) return direct;
+    const roots = collectRoots();
+    for (const selector of [PAGE_SELECTOR, PAGE_FALLBACK_SELECTOR]) {
+      const found = visibleCandidates(
+        roots.flatMap((root) => [...root.querySelectorAll(selector)])
+      );
+      if (found.length) return found;
+    }
+    return [];
   }
 
   // src/shared/timing.ts
@@ -1086,20 +1118,35 @@ ${xref}
     removeNoticeLater();
     return { message };
   }
-  function startScan(book, options) {
-    if (isRunning()) return { message: "A scan is already running." };
-    scan(book, options).catch((error) => {
-      notify(`Scan failed: ${error.message}`);
-      removeNoticeLater();
-    });
-    return { message: "Scan started. Watch the status in the reader tab." };
+  var starting = false;
+  async function startScan(book, options) {
+    if (starting || isRunning()) return { message: "A scan is already running." };
+    starting = true;
+    try {
+      const token = crypto.randomUUID();
+      if (!await acquireBookScan(book, token)) {
+        return { message: "This book is already being scanned in another reader tab." };
+      }
+      void scan(book, options).catch((error) => {
+        notify(`Scan failed: ${error.message}`);
+        removeNoticeLater();
+      }).finally(() => releaseBookScan(book, token).catch((error) => {
+        console.warn("Could not release the scan lock", error);
+      }));
+      return { message: "Scan started. Watch the status in the reader tab." };
+    } finally {
+      starting = false;
+    }
   }
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     const book = bookId();
     switch (request.action) {
       case "startScan":
-        sendResponse(startScan(book, request.options));
-        return false;
+        startScan(book, request.options).then(
+          sendResponse,
+          (error) => sendResponse({ error: `Scan could not start: ${error.message}` })
+        );
+        return true;
       case "retune":
         sendResponse({
           message: retune(request.options) ? "Pacing updated." : "No scan is running."

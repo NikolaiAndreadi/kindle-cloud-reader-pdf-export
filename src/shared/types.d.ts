@@ -1,10 +1,7 @@
-// Shapes shared by the content script, the popup and the preview page.
-//
-// Declared as ambient globals rather than exported: three independent bundles
-// use them, none of them at runtime, and a declaration file emits nothing. The
+// Ambient globals rather than exports: three independent bundles use these,
+// none of them at runtime, and a declaration file emits nothing. The
 // alternative is an `import type` line in every module for no benefit.
 
-/** A page element the reader has painted. */
 type PageElement = HTMLImageElement | HTMLCanvasElement;
 
 /**
@@ -18,38 +15,31 @@ interface ReaderPosition {
   total: number;
 }
 
-/** One captured view, in capture order. */
 interface CaptureRecord {
-  /** 1-based capture order. Decides PDF order and the storage key. */
   index: number;
-  /** Position key such as "page:124", or '' when the footer was hidden. */
+  /** "page:124" or "location:4879", '' when the footer was hidden. */
   position: string;
-  /** Content identity, used to skip re-storing a view we already have. */
   fingerprint: string;
-  /** Reader page number when it was visible, for display only. */
+  /** For display only — see ReaderPosition. */
   page: number | null;
 }
 
-/** Per-book index kept alongside the stored pages. */
 interface BookMeta {
   version: 2;
   bookId: string;
   captures: CaptureRecord[];
   total: number | null;
   kind: 'page' | 'location' | null;
-  /** Split setting used to create this cache; null means legacy/unknown. */
   split: boolean | null;
   /**
-   * JPEG quality the pages were encoded at. Fixed by the first scan so one book
-   * cannot end up holding pages encoded two ways. Null for caches written
-   * before it was recorded.
+   * Fixed by the first scan so one book cannot end up holding pages encoded two
+   * ways. Null here and in `split` means a cache written before the setting was
+   * recorded, not a default.
    */
   quality: number | null;
-  /** Which page-turn strategy worked for this book, so later scans skip probing. */
   turnStrategy: string | null;
 }
 
-/** One captured page as persisted in chrome.storage.local. */
 interface StoredPage {
   index: number;
   page: number | null;
@@ -59,9 +49,9 @@ interface StoredPage {
 }
 
 /**
- * The OCR result for one stored page, persisted beside it rather than inside it:
- * a page record is read back for the preview grid, where the words would be dead
- * weight, and OCR is added long after the page was captured.
+ * Persisted beside the page rather than inside it: a page record is read back
+ * for the preview grid, where the words would be dead weight, and OCR is added
+ * long after the page was captured.
  */
 interface StoredOcr {
   index: number;
@@ -69,7 +59,7 @@ interface StoredOcr {
   width: number;
   height: number;
   words: OcrWord[];
-  /** Mean word confidence, 0–100. Kept for display, not used when exporting. */
+  /** Mean word confidence, 0–100. */
   confidence: number;
 }
 
@@ -84,14 +74,12 @@ interface CapturedPage {
   dataUrl: string;
 }
 
-/** A candidate page element together with the geometry used to order it. */
 interface PageCandidate {
   element: PageElement;
   rect: DOMRect;
   area: number;
 }
 
-/** A rectangle of a source bitmap that should become one PDF page. */
 interface Region {
   sx: number;
   sy: number;
@@ -99,24 +87,22 @@ interface Region {
   sh: number;
 }
 
-/** A region together with the hash of the pixels inside it. */
 interface RegionView {
   region: Region;
   /** null when the source canvas is tainted and cannot be read back. */
   signature: string | null;
 }
 
-/** JPEG ready to be written into the PDF. */
 interface PdfImage {
   width: number;
   height: number;
   bytes: Uint8Array;
 }
 
-/** Sheet the pages are written on. 'native' keeps the capture's own aspect. */
+/** 'native' keeps the capture's own aspect instead of a fixed sheet. */
 type PaperName = 'a4' | 'letter' | 'native';
 
-/** Where a captured bitmap sits on a PDF page, all in points. */
+/** All in points. */
 interface PageLayout {
   pageWidth: number;
   pageHeight: number;
@@ -148,7 +134,6 @@ interface OcrWord {
   s?: number;
 }
 
-/** How to map OCR pixel coordinates onto a PDF page. */
 interface TextPlacement {
   /** Points per source pixel. */
   scale: number;
@@ -166,7 +151,6 @@ interface PdfOptions {
 
 interface PdfBuilder {
   readonly pages: number;
-  /** Pages that ended up carrying a text layer. */
   readonly textPages: number;
   addImage(image: PdfImage, words?: OcrWord[]): void;
   /** Coalesce buffered output into a Blob so it can leave the JS heap. */
@@ -177,10 +161,7 @@ interface PdfBuilder {
 interface ScanOptions {
   /** Base wait around a page turn, in milliseconds. */
   delay?: number;
-  /**
-   * 0–5. How much random extra time to add to each wait, so a scan does not
-   * turn pages on a metronome. 0 keeps the base delay exactly.
-   */
+  /** 0–5. Random extra time added to each wait; 0 keeps the base delay exactly. */
   jitter?: number;
   quality?: number;
   /**
@@ -190,33 +171,28 @@ interface ScanOptions {
    */
   split?: boolean;
   /**
-   * Sheet the PDF is written on. Unlike quality and split this is not pinned by
-   * the first scan: it is applied when the export runs, so the same cache can be
-   * saved as A4 today and Letter tomorrow.
+   * Unlike quality and split this is not pinned by the first scan: it is applied
+   * when the export runs, so the same cache can be saved as A4 today and Letter
+   * tomorrow.
    */
   paper?: PaperName;
 }
 
-/** What the popup shows about the reader and the cache for one book. */
 interface BookState {
   bookId: string;
   /** False when the tab is on the reader but no book is rendered. */
   bookOpen: boolean;
   scanning: boolean;
   count: number;
-  /** Total pages, only when the reader actually reports pages. */
+  /** Only when the reader actually counts in pages — see `kind`. */
   total: number | null;
-  /** What the reader counts in. Location totals are not page counts. */
   kind: 'page' | 'location' | null;
   position: ReaderPosition | null;
-  /** Captures whose image bytes are identical to another capture. */
   duplicates: number;
-  /** Captures that already have an OCR text layer stored. */
   recognised: number;
   /**
-   * What the cache has already committed to for the whole book. Null until the
-   * first scan pins it, or for a cache written before it was recorded. The
-   * popup shows these rather than the last values it was left set to.
+   * What the cache has already committed to for the whole book. The popup shows
+   * these rather than the last values it was left set to.
    */
   split: boolean | null;
   quality: number | null;
@@ -236,12 +212,10 @@ interface ReaderMessage {
   message: string;
 }
 
-/** An action that failed before it could produce its normal reply. */
 interface ReaderFailure {
   error: string;
 }
 
-/** Reply type for each action, so callers know what they get back. */
 interface ReaderReplies {
   startScan: ReaderMessage;
   retune: ReaderMessage;

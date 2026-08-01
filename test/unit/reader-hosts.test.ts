@@ -31,6 +31,10 @@ describe('isReaderUrl', () => {
     assert.equal(isReaderUrl('http://read.amazon.com/'), false);
     assert.equal(isReaderUrl(undefined), false);
   });
+
+  it('rejects malformed URLs instead of throwing', () => {
+    assert.equal(isReaderUrl('not a url'), false);
+  });
 });
 
 describe('manifest.json', () => {
@@ -45,5 +49,6 @@ describe('manifest.json', () => {
     const manifest = JSON.parse(await readFile(new URL('../../manifest.json', import.meta.url), 'utf8'));
     assert.deepEqual(manifest.content_scripts[0].js, ['content.js']);
     assert.equal(manifest.action.default_popup, 'popup.html');
+    assert.equal(manifest.background.service_worker, 'background.js');
   });
 });

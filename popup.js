@@ -28,8 +28,17 @@
     "read.amazon.se",
     "read.amazon.sg"
   ];
+  var READER_HOST_SET = new Set(READER_HOSTS);
   var READER_HOME = "https://read.amazon.com/";
-  var isReaderUrl = (url) => !!url && READER_HOSTS.some((host) => url.startsWith(`https://${host}/`));
+  function isReaderUrl(value) {
+    if (!value) return false;
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && READER_HOST_SET.has(url.hostname);
+    } catch {
+      return false;
+    }
+  }
 
   // src/shared/timing.ts
   var DELAY_MIN = 700;

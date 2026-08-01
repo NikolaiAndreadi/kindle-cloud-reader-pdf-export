@@ -1,5 +1,60 @@
 "use strict";
 (() => {
+  // src/shared/reader-hosts.ts
+  var READER_HOSTS = [
+    "read.amazon.com",
+    "read.amazon.ca",
+    "read.amazon.co.jp",
+    "read.amazon.co.uk",
+    "read.amazon.com.au",
+    "read.amazon.com.be",
+    "read.amazon.com.br",
+    "read.amazon.com.mx",
+    "read.amazon.com.tr",
+    "read.amazon.de",
+    "read.amazon.eg",
+    "read.amazon.es",
+    "read.amazon.fr",
+    "read.amazon.in",
+    "read.amazon.it",
+    "read.amazon.nl",
+    "read.amazon.pl",
+    "read.amazon.sa",
+    "read.amazon.se",
+    "read.amazon.sg"
+  ];
+  var READER_HOST_SET = new Set(READER_HOSTS);
+  function isReaderUrl(value) {
+    if (!value) return false;
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && READER_HOST_SET.has(url.hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  // src/shared/scanning.ts
+  async function askTab(id) {
+    try {
+      const reply = await chrome.tabs.sendMessage(
+        id,
+        { action: "getState" }
+      );
+      return !reply || "error" in reply ? null : reply;
+    } catch {
+      return null;
+    }
+  }
+  async function scanRunning(book2) {
+    const tabs = await chrome.tabs.query({});
+    const readerIds = tabs.flatMap(
+      (tab) => tab.id !== void 0 && isReaderUrl(tab.url) ? [tab.id] : []
+    );
+    const states = await Promise.all(readerIds.map(askTab));
+    return states.some((state) => state?.scanning && state.bookId === book2);
+  }
+
   // src/shared/storage.ts
   var READ_BATCH = 20;
   var metaKey = (book2) => `book:${book2}:meta`;
@@ -30,9 +85,9 @@
     return emptyMeta(book2);
   }
   var saveMeta = (meta) => chrome.storage.local.set({ [metaKey(meta.bookId)]: meta });
-  async function* pagesInBatches(book2, captures2, size = READ_BATCH) {
-    for (let start = 0; start < captures2.length; start += size) {
-      const batch = captures2.slice(start, start + size);
+  async function* pagesInBatches(book2, captures, size = READ_BATCH) {
+    for (let start = 0; start < captures.length; start += size) {
+      const batch = captures.slice(start, start + size);
       const stored = await chrome.storage.local.get(batch.map((c) => pageKey(book2, c.index)));
       yield batch.map((capture) => ({
         capture,
@@ -41,10 +96,10 @@
     }
   }
   var storeOcr = (book2, capture, result) => chrome.storage.local.set({ [ocrKeyFor(book2, capture)]: result });
-  async function loadOcrBatch(book2, captures2) {
-    const stored = await chrome.storage.local.get(captures2.map((c) => ocrKeyFor(book2, c)));
+  async function loadOcrBatch(book2, captures) {
+    const stored = await chrome.storage.local.get(captures.map((c) => ocrKeyFor(book2, c)));
     const found = /* @__PURE__ */ new Map();
-    for (const capture of captures2) {
+    for (const capture of captures) {
       const record = stored[ocrKeyFor(book2, capture)];
       if (Array.isArray(record?.words)) found.set(capture.index, record);
     }
@@ -60,8 +115,8 @@
     if (!Number.isInteger(index) || index <= 0) return null;
     return { index, fingerprint: rest.slice(split + 1) };
   }
-  async function recognisedIndexes(book2, captures2, size = READ_BATCH) {
-    const wanted = new Set(captures2.map((capture) => `${capture.index}:${capture.fingerprint}`));
+  async function recognisedIndexes(book2, captures, size = READ_BATCH) {
+    const wanted = new Set(captures.map((capture) => `${capture.index}:${capture.fingerprint}`));
     const found = /* @__PURE__ */ new Set();
     const local = chrome.storage.local;
     if (typeof local.getKeys === "function") {
@@ -71,8 +126,8 @@
       }
       return found;
     }
-    for (let start = 0; start < captures2.length; start += size) {
-      for (const index of (await loadOcrBatch(book2, captures2.slice(start, start + size))).keys()) {
+    for (let start = 0; start < captures.length; start += size) {
+      for (const index of (await loadOcrBatch(book2, captures.slice(start, start + size))).keys()) {
         found.add(index);
       }
     }
@@ -101,13 +156,297 @@
     await local.remove([pageKey(book2, index), ...stale]);
     return meta;
   }
-  function fingerprintCounts(captures2) {
+  function fingerprintCounts(captures) {
     const counts = /* @__PURE__ */ new Map();
-    for (const capture of captures2) {
+    for (const capture of captures) {
       if (capture.fingerprint) counts.set(capture.fingerprint, (counts.get(capture.fingerprint) || 0) + 1);
     }
     return counts;
   }
+
+  // src/preview/elements.ts
+  function required(id) {
+    const node = document.getElementById(id);
+    if (!node) throw new Error(`Missing element: #${id}`);
+    return node;
+  }
+  var ui = {
+    grid: required("grid"),
+    summary: required("summary"),
+    title: required("title"),
+    lock: required("lock"),
+    viewer: required("viewer"),
+    viewerImage: required("viewer-image"),
+    ocrStart: required("ocrStart"),
+    ocrStop: required("ocrStop"),
+    ocrStatus: required("ocrStatus")
+  };
+  var plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  var message = (error) => error instanceof Error ? error.message : String(error);
+  function span(text, className) {
+    const node = document.createElement("span");
+    node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  }
+
+  // src/preview/grid.ts
+  var ARM_MS = 3e3;
+  var LOCK_TEXT = "A scan is running — reordering and deleting are paused until it finishes.";
+  var PreviewGrid = class {
+    book;
+    records = [];
+    total = null;
+    tiles = /* @__PURE__ */ new Map();
+    recognised = /* @__PURE__ */ new Set();
+    armed = null;
+    armTimer = 0;
+    dragged = null;
+    editLocked = false;
+    onChange = () => {
+    };
+    constructor(book2) {
+      this.book = book2;
+      ui.lock.textContent = LOCK_TEXT;
+      ui.viewer.addEventListener("click", () => ui.viewer.close());
+      this.bindDragging();
+    }
+    get captures() {
+      return this.records;
+    }
+    get locked() {
+      return this.editLocked;
+    }
+    recognisedCount() {
+      return this.records.filter((capture) => this.recognised.has(capture.index)).length;
+    }
+    showMessage(text) {
+      this.tiles.clear();
+      this.records = [];
+      this.recognised.clear();
+      ui.summary.textContent = text;
+      ui.grid.replaceChildren(Object.assign(document.createElement("p"), {
+        className: "empty",
+        textContent: text
+      }));
+      this.onChange();
+    }
+    showError(error) {
+      ui.summary.textContent = message(error);
+    }
+    setMeta(meta) {
+      this.records = meta.captures;
+      this.total = meta.total;
+      this.refresh();
+    }
+    clearTiles() {
+      this.tiles.clear();
+      ui.grid.replaceChildren();
+    }
+    append(capture, page) {
+      ui.grid.append(this.createTile(capture, page));
+    }
+    async refreshRecognised() {
+      this.recognised = await recognisedIndexes(this.book, this.records);
+      this.refresh();
+    }
+    markRecognised(index) {
+      this.recognised.add(index);
+      const tile = this.tiles.get(index);
+      if (tile) tile.mark.textContent = "text";
+    }
+    setLocked(value) {
+      if (this.editLocked === value) return;
+      this.editLocked = value;
+      ui.lock.hidden = !value;
+      ui.grid.classList.toggle("locked", value);
+      this.disarm();
+      for (const tile of this.tiles.values()) {
+        tile.figure.draggable = !value;
+        tile.remove.disabled = value;
+      }
+    }
+    /**
+     * Redraw everything that depends on the set of captures rather than on one
+     * page: the summary line and the repeat markers, both of which change when a
+     * page is deleted.
+     */
+    refresh() {
+      const counts = fingerprintCounts(this.records);
+      let duplicates = 0;
+      for (const count of counts.values()) duplicates += count - 1;
+      for (const [index, tile] of this.tiles) {
+        const repeated = (counts.get(tile.fingerprint) || 0) > 1;
+        tile.figure.classList.toggle("dupe", repeated);
+        tile.label.textContent = tile.text + (repeated ? " · repeat" : "");
+        tile.mark.textContent = this.recognised.has(index) ? "text" : "";
+      }
+      ui.summary.replaceChildren(span(plural(this.records.length, "page")));
+      if (this.total) ui.summary.append(span(` of about ${this.total}`));
+      if (duplicates) {
+        ui.summary.append(span(" · "), span(plural(duplicates, "duplicate"), "warn"));
+      }
+      ui.summary.append(span(" · drag to reorder · the PDF follows this order"));
+      this.onChange();
+    }
+    openViewer(dataUrl, label) {
+      ui.viewerImage.src = dataUrl;
+      ui.viewerImage.alt = label;
+      ui.viewer.showModal();
+    }
+    disarm() {
+      if (!this.armed) return;
+      this.armed.classList.remove("armed");
+      this.armed.textContent = "×";
+      this.armed = null;
+      clearTimeout(this.armTimer);
+    }
+    arm(button) {
+      this.disarm();
+      this.armed = button;
+      button.classList.add("armed");
+      button.textContent = "Delete?";
+      this.armTimer = window.setTimeout(() => this.disarm(), ARM_MS);
+    }
+    /**
+     * Whether this page may write to the index right now. Asked immediately before
+     * every edit rather than trusting the poll: a scan started in the last couple
+     * of seconds would otherwise swallow the edit at its next flush, silently.
+     */
+    async mayEdit() {
+      const running = await scanRunning(this.book);
+      this.setLocked(running);
+      return !running;
+    }
+    /**
+     * Deleting a page cannot be undone short of scanning it again, so the first
+     * click only arms the button. Same idea as holding "Clear this book" in the
+     * popup, scaled down to one page.
+     */
+    deleteButton(index, figure) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "del";
+      button.textContent = "×";
+      button.title = `Delete capture #${index}`;
+      button.setAttribute("aria-label", `Delete capture #${index}`);
+      button.disabled = this.editLocked;
+      button.addEventListener("click", () => void this.delete(index, figure, button));
+      return button;
+    }
+    async delete(index, figure, button) {
+      if (this.armed !== button) {
+        this.arm(button);
+        return;
+      }
+      this.disarm();
+      button.disabled = true;
+      try {
+        if (!await this.mayEdit()) {
+          button.disabled = this.editLocked;
+          return;
+        }
+        const meta = await deleteCapture(this.book, index);
+        this.records = meta.captures;
+        this.tiles.delete(index);
+        figure.remove();
+        if (!this.records.length) this.showMessage("Nothing cached for this book yet.");
+        else this.refresh();
+      } catch (error) {
+        button.disabled = this.editLocked;
+        this.showError(error);
+      }
+    }
+    createTile(capture, page) {
+      const figure = document.createElement("figure");
+      figure.draggable = !this.editLocked;
+      figure.dataset.index = String(capture.index);
+      const text = `#${capture.index}${page?.page ? ` · page ${page.page}` : ""}`;
+      const label = span(text);
+      const caption = document.createElement("figcaption");
+      if (page?.dataUrl) {
+        const image = document.createElement("img");
+        image.src = page.dataUrl;
+        image.loading = "lazy";
+        image.alt = text;
+        image.draggable = false;
+        image.addEventListener("click", () => this.openViewer(page.dataUrl, text));
+        figure.append(image);
+        caption.append(label, span(`${page.width}×${page.height}`));
+      } else {
+        figure.classList.add("gone");
+        label.textContent = `${text} — missing from storage`;
+        caption.append(label);
+      }
+      const mark = span(this.recognised.has(capture.index) ? "text" : "", "text");
+      const remove = this.deleteButton(capture.index, figure);
+      caption.append(mark, remove);
+      figure.append(caption);
+      this.tiles.set(capture.index, {
+        figure,
+        label,
+        text,
+        mark,
+        remove,
+        fingerprint: capture.fingerprint
+      });
+      return figure;
+    }
+    shownOrder() {
+      return [...ui.grid.children].map((node) => Number(node.dataset.index)).filter((index) => Number.isFinite(index) && index > 0);
+    }
+    /** Put the tiles back in stored order, after an edit that was refused. */
+    restoreOrder() {
+      for (const capture of this.records) {
+        const tile = this.tiles.get(capture.index);
+        if (tile) ui.grid.append(tile.figure);
+      }
+    }
+    async persistOrder() {
+      const order = this.shownOrder();
+      if (order.every((index, at) => this.records[at]?.index === index)) return;
+      if (!await this.mayEdit()) {
+        this.restoreOrder();
+        return;
+      }
+      const meta = await reorderCaptures(this.book, order);
+      this.records = meta.captures;
+      this.refresh();
+    }
+    bindDragging() {
+      ui.grid.addEventListener("dragstart", (event) => {
+        const figure = event.target?.closest("figure");
+        if (!figure || this.editLocked) {
+          event.preventDefault();
+          return;
+        }
+        this.disarm();
+        this.dragged = figure;
+        figure.classList.add("dragging");
+        event.dataTransfer?.setData("text/plain", figure.dataset.index ?? "");
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      });
+      ui.grid.addEventListener("dragover", (event) => {
+        if (!this.dragged) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        const over = event.target?.closest("figure");
+        if (!over || over === this.dragged) return;
+        const box = over.getBoundingClientRect();
+        const after = event.clientX > box.left + box.width / 2;
+        ui.grid.insertBefore(this.dragged, after ? over.nextSibling : over);
+      });
+      ui.grid.addEventListener("drop", (event) => event.preventDefault());
+      ui.grid.addEventListener("dragend", () => {
+        this.dragged?.classList.remove("dragging");
+        this.dragged = null;
+        void this.persistOrder().catch((error) => {
+          this.restoreOrder();
+          this.showError(error);
+        });
+      });
+    }
+  };
 
   // src/ocr/engine.ts
   var OEM_LSTM_ONLY = 1;
@@ -258,7 +597,7 @@
     let failure;
     try {
       while (pending.length && !result.stopped && !failure) {
-        const total2 = result.recognised + result.skipped + pending.length;
+        const total = result.recognised + result.skipped + pending.length;
         for await (const batch of pagesInBatches(book2, pending)) {
           if (result.stopped || failure) break;
           let cursor = 0;
@@ -292,7 +631,7 @@
               result.recognised += 1;
               options.onProgress({
                 done: result.recognised + result.skipped,
-                total: total2,
+                total,
                 index: capture.index
               });
             }
@@ -308,356 +647,118 @@
     return result;
   }
 
-  // src/shared/reader-hosts.ts
-  var READER_HOSTS = [
-    "read.amazon.com",
-    "read.amazon.ca",
-    "read.amazon.co.jp",
-    "read.amazon.co.uk",
-    "read.amazon.com.au",
-    "read.amazon.com.be",
-    "read.amazon.com.br",
-    "read.amazon.com.mx",
-    "read.amazon.com.tr",
-    "read.amazon.de",
-    "read.amazon.eg",
-    "read.amazon.es",
-    "read.amazon.fr",
-    "read.amazon.in",
-    "read.amazon.it",
-    "read.amazon.nl",
-    "read.amazon.pl",
-    "read.amazon.sa",
-    "read.amazon.se",
-    "read.amazon.sg"
-  ];
-  var isReaderUrl = (url) => !!url && READER_HOSTS.some((host) => url.startsWith(`https://${host}/`));
-
-  // src/shared/scanning.ts
-  async function askTab(id) {
-    try {
-      const reply = await chrome.tabs.sendMessage(
-        id,
-        { action: "getState" }
-      );
-      return !reply || "error" in reply ? null : reply;
-    } catch {
-      return null;
+  // src/preview/ocr.ts
+  var OcrController = class {
+    book;
+    grid;
+    running = false;
+    stopRequested = false;
+    constructor(book2, grid2) {
+      this.book = book2;
+      this.grid = grid2;
+      ui.ocrStart.addEventListener("click", () => void this.start());
+      ui.ocrStop.addEventListener("click", () => {
+        this.stopRequested = true;
+        ui.ocrStop.disabled = true;
+      });
+      addEventListener("beforeunload", (event) => {
+        if (!this.running) return;
+        event.preventDefault();
+      });
     }
-  }
-  async function scanRunning(book2) {
-    const tabs = await chrome.tabs.query({});
-    const readers = tabs.filter((tab) => tab.id !== void 0 && isReaderUrl(tab.url));
-    const states = await Promise.all(readers.map((tab) => askTab(tab.id)));
-    return states.some((state) => state?.scanning && state.bookId === book2);
-  }
+    describe() {
+      if (this.running) return;
+      const total = this.grid.captures.length;
+      if (!total) {
+        ui.ocrStatus.textContent = "";
+        ui.ocrStart.disabled = true;
+        return;
+      }
+      const done = this.grid.recognisedCount();
+      ui.ocrStart.disabled = done === total;
+      ui.ocrStatus.textContent = done === total ? `All ${plural(total, "page")} carry searchable text.` : `${done} of ${total} pages have a text layer · the PDF gets one wherever it exists.`;
+    }
+    async start() {
+      if (this.running) return;
+      this.running = true;
+      this.stopRequested = false;
+      ui.ocrStart.hidden = true;
+      ui.ocrStop.hidden = false;
+      ui.ocrStop.disabled = false;
+      ui.ocrStatus.textContent = "Starting…";
+      let outcome = "";
+      try {
+        const result = await runOcr(this.book, {
+          onProgress: (progress) => {
+            if (progress.index !== void 0) this.grid.markRecognised(progress.index);
+            ui.ocrStatus.textContent = progress.status ? `${progress.status}…` : `Reading page ${progress.done} of ${progress.total}${this.stopRequested ? " · stopping after this page" : ""}`;
+          },
+          shouldStop: () => this.stopRequested
+        });
+        const skipped = result.skipped ? `, ${plural(result.skipped, "page")} skipped` : "";
+        outcome = result.stopped ? `Stopped after ${plural(result.recognised, "page")}${skipped}. Start again to carry on.` : `Finished — ${plural(result.recognised, "page")} recognised${skipped}.`;
+      } catch (error) {
+        outcome = `OCR failed: ${message(error)}`;
+      } finally {
+        this.running = false;
+        ui.ocrStart.hidden = false;
+        ui.ocrStop.hidden = true;
+        try {
+          await this.grid.refreshRecognised();
+        } catch (error) {
+          outcome += ` (the page count could not be refreshed: ${message(error)})`;
+        }
+        if (outcome) ui.ocrStatus.textContent = outcome;
+      }
+    }
+  };
 
   // src/preview/main.ts
-  var el = (id) => document.getElementById(id);
-  var grid = el("grid");
-  var summary = el("summary");
-  var title = el("title");
-  var lock = el("lock");
-  var viewer = el("viewer");
-  var viewerImage = el("viewer-image");
-  var ocrStart = el("ocrStart");
-  var ocrStop = el("ocrStop");
-  var ocrStatus = el("ocrStatus");
-  var book = new URLSearchParams(location.search).get("book") || "";
-  var ARM_MS = 3e3;
   var WATCH_MS = 2e3;
-  var LOCK_TEXT = "A scan is running — reordering and deleting are paused until it finishes.";
-  var captures = [];
-  var total = null;
-  var locked = false;
-  var tiles = /* @__PURE__ */ new Map();
-  var recognised = /* @__PURE__ */ new Set();
-  var plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  var span = (text, className) => {
-    const node = document.createElement("span");
-    node.textContent = text;
-    if (className) node.className = className;
-    return node;
-  };
-  function openViewer(dataUrl, label) {
-    viewerImage.src = dataUrl;
-    viewerImage.alt = label;
-    viewer.showModal();
-  }
-  viewer.addEventListener("click", () => viewer.close());
-  function message(text) {
-    tiles.clear();
-    captures = [];
-    recognised = /* @__PURE__ */ new Set();
-    describeOcr();
-    summary.textContent = text;
-    grid.replaceChildren(Object.assign(document.createElement("p"), {
-      className: "empty",
-      textContent: text
-    }));
-  }
-  function describeCache(duplicates) {
-    summary.replaceChildren(span(plural(captures.length, "page")));
-    if (total) summary.append(span(` of about ${total}`));
-    if (duplicates) summary.append(span(" · "), span(plural(duplicates, "duplicate"), "warn"));
-    summary.append(span(" · drag to reorder · the PDF follows this order"));
-  }
-  function refresh() {
-    const counts = fingerprintCounts(captures);
-    let duplicates = 0;
-    for (const count of counts.values()) duplicates += count - 1;
-    for (const [index, tile2] of tiles) {
-      const repeated = (counts.get(tile2.fingerprint) || 0) > 1;
-      tile2.figure.classList.toggle("dupe", repeated);
-      tile2.label.textContent = tile2.text + (repeated ? " · repeat" : "");
-      tile2.mark.textContent = recognised.has(index) ? "text" : "";
-    }
-    describeCache(duplicates);
-    describeOcr();
-  }
-  var armed = null;
-  var armTimer = 0;
-  function disarm() {
-    if (!armed) return;
-    armed.classList.remove("armed");
-    armed.textContent = "×";
-    armed = null;
-    clearTimeout(armTimer);
-  }
-  function arm(button) {
-    disarm();
-    armed = button;
-    button.classList.add("armed");
-    button.textContent = "Delete?";
-    armTimer = window.setTimeout(disarm, ARM_MS);
-  }
-  function restoreOrder() {
-    for (const capture of captures) {
-      const tile2 = tiles.get(capture.index);
-      if (tile2) grid.append(tile2.figure);
-    }
-  }
-  function setLocked(value) {
-    if (locked === value) return;
-    locked = value;
-    lock.hidden = !value;
-    grid.classList.toggle("locked", value);
-    disarm();
-    for (const tile2 of tiles.values()) {
-      tile2.figure.draggable = !value;
-      tile2.remove.disabled = value;
-    }
-  }
-  async function mayEdit() {
-    const running = await scanRunning(book);
-    setLocked(running);
-    return !running;
-  }
-  function deleteButton(index, figure) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "del";
-    button.textContent = "×";
-    button.title = `Delete capture #${index}`;
-    button.setAttribute("aria-label", `Delete capture #${index}`);
-    button.disabled = locked;
-    button.addEventListener("click", async () => {
-      if (armed !== button) {
-        arm(button);
-        return;
-      }
-      disarm();
-      button.disabled = true;
-      if (!await mayEdit()) {
-        button.disabled = locked;
-        return;
-      }
-      const meta = await deleteCapture(book, index);
-      captures = meta.captures;
-      tiles.delete(index);
-      figure.remove();
-      if (!tiles.size) {
-        message("Nothing cached for this book yet.");
-        return;
-      }
-      refresh();
-    });
-    return button;
-  }
-  function tile(capture, page) {
-    const figure = document.createElement("figure");
-    figure.draggable = !locked;
-    figure.dataset.index = String(capture.index);
-    const text = `#${capture.index}${page?.page ? ` · page ${page.page}` : ""}`;
-    const label = span(text);
-    const caption = document.createElement("figcaption");
-    if (page?.dataUrl) {
-      const image = document.createElement("img");
-      image.src = page.dataUrl;
-      image.loading = "lazy";
-      image.alt = text;
-      image.draggable = false;
-      image.addEventListener("click", () => openViewer(page.dataUrl, text));
-      figure.append(image);
-      caption.append(label, span(`${page.width}×${page.height}`));
-    } else {
-      figure.classList.add("gone");
-      label.textContent = `${text} — missing from storage`;
-      caption.append(label);
-    }
-    const mark = span(recognised.has(capture.index) ? "text" : "", "text");
-    const remove = deleteButton(capture.index, figure);
-    caption.append(mark, remove);
-    figure.append(caption);
-    tiles.set(capture.index, { figure, label, text, mark, remove, fingerprint: capture.fingerprint });
-    return figure;
-  }
-  var shownOrder = () => [...grid.children].map((node) => Number(node.dataset.index)).filter((index) => Number.isFinite(index) && index > 0);
-  async function persistOrder() {
-    const order = shownOrder();
-    if (order.every((index, at) => captures[at]?.index === index)) return;
-    if (!await mayEdit()) {
-      restoreOrder();
-      return;
-    }
-    const meta = await reorderCaptures(book, order);
-    captures = meta.captures;
-    refresh();
-  }
-  var dragged = null;
-  grid.addEventListener("dragstart", (event) => {
-    const figure = event.target?.closest("figure");
-    if (!figure || locked) {
-      event.preventDefault();
-      return;
-    }
-    disarm();
-    dragged = figure;
-    figure.classList.add("dragging");
-    event.dataTransfer?.setData("text/plain", figure.dataset.index ?? "");
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-  });
-  grid.addEventListener("dragover", (event) => {
-    if (!dragged) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-    const over = event.target?.closest("figure");
-    if (!over || over === dragged) return;
-    const box = over.getBoundingClientRect();
-    const after = event.clientX > box.left + box.width / 2;
-    grid.insertBefore(dragged, after ? over.nextSibling : over);
-  });
-  grid.addEventListener("drop", (event) => event.preventDefault());
-  grid.addEventListener("dragend", () => {
-    dragged?.classList.remove("dragging");
-    dragged = null;
-    void persistOrder();
-  });
-  var ocrRunning = false;
-  var ocrStopRequested = false;
-  function describeOcr() {
-    if (ocrRunning) return;
-    const total2 = captures.length;
-    if (!total2) {
-      ocrStatus.textContent = "";
-      ocrStart.disabled = true;
-      return;
-    }
-    const done = captures.filter((capture) => recognised.has(capture.index)).length;
-    ocrStart.disabled = done === total2;
-    ocrStatus.textContent = done === total2 ? `All ${plural(total2, "page")} carry searchable text.` : `${done} of ${total2} pages have a text layer · the PDF gets one wherever it exists.`;
-  }
-  async function refreshRecognised() {
-    recognised = await recognisedIndexes(book, captures);
-    refresh();
-  }
-  function markRecognised(index) {
-    recognised.add(index);
-    const tile2 = tiles.get(index);
-    if (tile2) tile2.mark.textContent = "text";
-  }
-  async function startOcr() {
-    if (ocrRunning) return;
-    ocrRunning = true;
-    ocrStopRequested = false;
-    ocrStart.hidden = true;
-    ocrStop.hidden = false;
-    ocrStop.disabled = false;
-    ocrStatus.textContent = "Starting…";
-    let outcome = "";
-    try {
-      const result = await runOcr(book, {
-        onProgress: (progress) => {
-          if (progress.index !== void 0) markRecognised(progress.index);
-          ocrStatus.textContent = progress.status ? `${progress.status}…` : `Reading page ${progress.done} of ${progress.total}${ocrStopRequested ? " · stopping after this page" : ""}`;
-        },
-        shouldStop: () => ocrStopRequested
-      });
-      const skipped = result.skipped ? `, ${plural(result.skipped, "page")} skipped` : "";
-      outcome = result.stopped ? `Stopped after ${plural(result.recognised, "page")}${skipped}. Start again to carry on.` : `Finished — ${plural(result.recognised, "page")} recognised${skipped}.`;
-    } catch (error) {
-      outcome = `OCR failed: ${error instanceof Error ? error.message : String(error)}`;
-    } finally {
-      ocrRunning = false;
-      ocrStart.hidden = false;
-      ocrStop.hidden = true;
-      await refreshRecognised();
-      if (outcome) ocrStatus.textContent = outcome;
-    }
-  }
-  ocrStart.addEventListener("click", () => void startOcr());
-  ocrStop.addEventListener("click", () => {
-    ocrStopRequested = true;
-    ocrStop.disabled = true;
-  });
-  addEventListener("beforeunload", (event) => {
-    if (!ocrRunning) return;
-    event.preventDefault();
-  });
+  var book = new URLSearchParams(location.search).get("book") || "";
+  var grid = new PreviewGrid(book);
+  var ocr = new OcrController(book, grid);
+  grid.onChange = () => ocr.describe();
   var generation = 0;
   async function load() {
     const mine = ++generation;
-    title.textContent = `Captured pages · ${book}`;
+    ui.title.textContent = `Captured pages · ${book}`;
     if (!book) {
-      message("No book specified.");
+      grid.showMessage("No book specified.");
       return;
     }
     const meta = await loadMeta(book);
     if (mine !== generation) return;
     if (!meta.captures.length) {
-      message("Nothing cached for this book yet.");
+      grid.showMessage("Nothing cached for this book yet.");
       return;
     }
-    captures = meta.captures;
-    total = meta.total;
-    refresh();
-    await refreshRecognised();
+    grid.setMeta(meta);
+    await grid.refreshRecognised();
     if (mine !== generation) return;
     for await (const batch of pagesInBatches(book, meta.captures)) {
       if (mine !== generation) return;
-      grid.append(...batch.map(({ capture, page }) => tile(capture, page)));
-      refresh();
+      for (const { capture, page } of batch) grid.append(capture, page);
+      grid.refresh();
     }
   }
   async function reload() {
-    tiles.clear();
-    grid.replaceChildren();
+    grid.clearTiles();
     await load();
   }
   async function watchScan() {
-    const wasLocked = locked;
-    setLocked(await scanRunning(book));
-    if (wasLocked && !locked) await reload();
+    const wasLocked = grid.locked;
+    grid.setLocked(await scanRunning(book));
+    if (wasLocked && !grid.locked) await reload();
   }
   var watching = false;
   function tick() {
     if (watching) return;
     watching = true;
-    void watchScan().finally(() => {
+    void watchScan().catch((error) => grid.showError(error)).finally(() => {
       watching = false;
     });
   }
-  lock.textContent = LOCK_TEXT;
-  void load().then(tick);
+  void load().then(tick, (error) => grid.showMessage(`Could not load this book: ${message(error)}`));
   setInterval(tick, WATCH_MS);
 })();

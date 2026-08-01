@@ -1,9 +1,6 @@
 import { jitterCeiling } from '../shared/timing.ts';
 import { ui } from './elements.ts';
 
-// How long a message about something that just happened holds the status line
-// against the poll. Long enough to be read, short enough that the line goes
-// back to describing the reader well before anyone looks again.
 const NOTICE_MS = 4000;
 
 let noticeUntil = 0;
@@ -11,11 +8,9 @@ let noticeUntil = 0;
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**
- * Say something that happened, as opposed to what is currently true. The status
- * line is otherwise rewritten from the state on every poll, which gave these
- * messages a lifetime of anywhere between nothing and one tick: the hold hint
- * appeared to blink, and the result of an action was never visible at all,
- * because perform() sets it and then immediately refreshes.
+ * Say something that happened, as opposed to what is currently true. apply()
+ * rewrites the status line from the state on every poll, so without this the
+ * result of an action is overwritten before it can be read.
  */
 export function notice(message: string): void {
   noticeUntil = Date.now() + NOTICE_MS;
@@ -24,10 +19,8 @@ export function notice(message: string): void {
 
 const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)} s`;
 
-/**
- * Label the pacing sliders. Jitter is a bare 0–5 level, which means nothing on
- * its own, so it is shown as the range of waits it produces at the chosen delay.
- */
+// Jitter is a bare 0–5 level, which means nothing on its own, so it is shown as
+// the range of waits it produces at the chosen delay.
 export function showTiming(): void {
   const delay = Number(ui.delay.value);
   const jitter = Number(ui.jitter.value);
@@ -38,7 +31,7 @@ export function showTiming(): void {
 }
 
 // Deliberately says nothing about where the reader is: the counter it comes
-// from is repaginated for the window size, so "page 39 of 329" is a different
+// from is repaginated for the window width, so "page 39 of 329" is a different
 // page 39 at a different zoom and reads as precision the number does not have.
 function statusFor(state: BookState): string {
   if (state.scanning) return 'Scanning — watch the banner in the reader tab.';
@@ -49,11 +42,7 @@ function statusFor(state: BookState): string {
 function cacheFor(state: BookState): string {
   if (!state.count) return `No saved pages yet · ${state.bookId}`;
   const dupes = state.duplicates ? ` · ${plural(state.duplicates, 'duplicate')}` : '';
-  // state.total is null for location-counted books, so this never claims a page
-  // count the reader never gave us.
   const outOf = state.total ? ` of ~${state.total}` : '';
-  // OCR is run from the preview page, so all the popup owes anyone is how much
-  // of the book will come out searchable if they export it now.
   const text = state.recognised === state.count
     ? ' · all searchable'
     : state.recognised
@@ -74,9 +63,6 @@ function lockBookOptions(state: BookState | null): void {
   ui.split.disabled = locked;
   ui.bookOptions.classList.toggle('locked', locked);
 
-  // The greyed-out block explains itself on hover. The reason only matters to
-  // someone who has just tried to change one of these, so it does not need to
-  // occupy a line of the popup for everyone else.
   if (locked) ui.bookOptions.title = 'Available only for a new scan';
   else ui.bookOptions.removeAttribute('title');
   ui.bookNote.hidden = locked;
@@ -92,28 +78,16 @@ function lockBookOptions(state: BookState | null): void {
   if (choice) ui.quality.value = choice.value;
 }
 
-/**
- * The popup reflects what the reader is actually doing: there is no point
- * telling someone to open a book when they are already reading one, and no
- * point offering a scan when nothing is rendered.
- */
 export function apply(state: BookState | null, onReader: boolean, problem?: string): void {
   const ready = state?.bookOpen === true;
-  // Everything else here is a description of the current state and is safe to
-  // rewrite every tick. Only the status line can be holding a message.
+  // Everything else here describes the current state and is safe to rewrite
+  // every tick. Only the status line can be holding a notice().
   const spoken = Date.now() < noticeUntil;
 
-  // Three states, and the status line is the one thing common to all of them:
-  //
-  //   off the reader   status + the button that goes there
-  //   no book rendered status only — the controls have nothing to act on, and
-  //                    the button would point at the tab already in front of you
-  //   book rendered    status + the controls
-  //
-  // Whether the site is the reader comes from the tab's URL rather than from
-  // whether getState answered: a reader tab that predates the extension has no
-  // content script, and offering "Open read.amazon.com" there would point at
-  // itself when the answer in the status line is "reload this tab".
+  // Whether the tab is the reader comes from its URL rather than from whether
+  // getState answered: a reader tab that predates the extension has no content
+  // script, and offering "Open read.amazon.com" there would point at itself
+  // when the answer in the status line is "reload this tab".
   ui.open.hidden = onReader;
   ui.controls.hidden = !ready;
 

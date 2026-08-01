@@ -1,6 +1,6 @@
-// Page-turn pacing. The sliders in popup.html, the labels the popup draws for
-// them and the clamps the content script applies all have to agree, so the
-// bounds live here. build.mjs fails when popup.html has drifted from them.
+// The sliders in popup.html, the labels the popup draws for them and the clamps
+// the content script applies all have to agree, so the bounds live here.
+// build.mjs fails the build when popup.html has drifted from them.
 
 export const DELAY_MIN = 700;
 export const DELAY_MAX = 2000;

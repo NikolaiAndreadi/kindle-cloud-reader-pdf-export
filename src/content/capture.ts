@@ -46,10 +46,8 @@ export function naturalSize(element: PageElement): { width: number; height: numb
 export const isWide = (width: number, height: number): boolean =>
   height > 0 && width / height >= SPREAD_ASPECT;
 
-/**
- * The rectangles of a bitmap that should each become a PDF page. A landscape
- * bitmap is a two-column spread, so splitting cuts it down the middle.
- */
+// The rectangles of a bitmap that should each become a PDF page: a landscape
+// bitmap is a two-column spread, so splitting cuts it down the middle.
 export function regionsFor(width: number, height: number, split: boolean): Region[] {
   if (!width || !height) return [];
   if (!split || !isWide(width, height)) return [{ sx: 0, sy: 0, sw: width, sh: height }];
@@ -109,11 +107,8 @@ function signatureOf(element: PageElement, region: Region): string | null {
   }
 }
 
-/**
- * One rendered element can hold two book pages: in two-column mode the reader
- * paints the whole spread as a single landscape bitmap. Returns each region
- * with its hash so the caller can skip encoding anything already captured.
- */
+// One rendered element can hold two book pages, so this returns each region
+// with its hash and the caller skips encoding anything already captured.
 export async function viewsOf(element: PageElement, split: boolean): Promise<RegionView[]> {
   if (!await decoded(element)) return [];
   const { width, height } = naturalSize(element);

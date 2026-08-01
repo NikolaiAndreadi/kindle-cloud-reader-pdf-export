@@ -69,10 +69,7 @@ export const saveMeta = (meta: BookMeta): Promise<void> =>
 export const nextIndex = (meta: BookMeta): number =>
   meta.captures.reduce((highest, capture) => Math.max(highest, capture.index), 0) + 1;
 
-/**
- * Write one page and record it in the in-memory index. The index is not
- * persisted here — the caller decides when to flush it, see META_FLUSH_EVERY.
- */
+/** The index is not persisted here — the caller flushes it, see META_FLUSH_EVERY. */
 export async function storePage(
   meta: BookMeta, record: CaptureRecord, image: CapturedPage
 ): Promise<void> {
@@ -88,10 +85,8 @@ export async function storePage(
   await chrome.storage.local.set({ [pageKey(meta.bookId, record.index)]: page });
 }
 
-/**
- * Stored pages for the given captures, a batch at a time. Both the PDF writer
- * and the preview grid consume this; neither can afford every data URL at once.
- */
+// Batched because neither the PDF writer nor the preview grid can afford every
+// data URL of a book in memory at once.
 export async function* pagesInBatches(
   book: string, captures: CaptureRecord[], size = READ_BATCH
 ): AsyncGenerator<{ capture: CaptureRecord; page: StoredPage | undefined }[]> {
@@ -105,19 +100,13 @@ export async function* pagesInBatches(
   }
 }
 
-/**
- * Store the words for one capture. The capture is passed whole rather than as an
- * index because its fingerprint is half of the key — see ocrKey.
- */
+/** Takes the whole capture because its fingerprint is half of the key — see ocrKey. */
 export const storeOcr = (
   book: string, capture: CaptureRecord, result: StoredOcr
 ): Promise<void> => chrome.storage.local.set({ [ocrKeyFor(book, capture)]: result });
 
-/**
- * The OCR records for a batch of captures, keyed by capture index. Absent
- * entries simply do not appear: a page that has not been recognised yet is
- * exported as an image, which is what the whole cache was before OCR existed.
- */
+// Absent entries simply do not appear: a page that has not been recognised yet
+// is exported as an image, which is what the whole cache was before OCR existed.
 export async function loadOcrBatch(
   book: string, captures: CaptureRecord[]
 ): Promise<Map<number, StoredOcr>> {
@@ -132,7 +121,6 @@ export async function loadOcrBatch(
   return found;
 }
 
-/** Index and fingerprint out of an OCR key, or null if the key is not one. */
 export function ocrKeyParts(
   book: string, key: string
 ): { index: number; fingerprint: string } | null {
@@ -147,13 +135,10 @@ export function ocrKeyParts(
 }
 
 /**
- * Which of these captures already have a text layer.
- *
- * Asked on every popup poll and on every preview refresh, so it goes by key
- * rather than by value where it can: reading the records themselves to count
- * them would pull tens of megabytes of words through for a number. The key
- * carries the fingerprint, so identity is checked without reading anything —
- * a record left behind by a deleted capture is not counted as that capture's.
+ * Which of these captures already have a text layer. Asked on every popup poll
+ * and every preview refresh, so it goes by key rather than by value where it
+ * can: reading the records to count them would pull tens of megabytes of words
+ * through for a number, and the key already carries the fingerprint.
  */
 export async function recognisedIndexes(
   book: string, captures: CaptureRecord[], size = READ_BATCH
@@ -181,15 +166,14 @@ export async function recognisedIndexes(
 }
 
 /**
- * Rewrite the capture order for a book. `order` lists capture indexes in the
- * order they should be exported; the index of a record never changes, because
- * it is the storage key of the page it points at.
+ * `order` lists capture indexes in export order; the index of a record itself
+ * never changes, because it is the storage key of the page it points at.
  *
- * The stored index is re-read rather than taking the caller's copy: a scan
- * running in another tab may have appended pages since the caller loaded it,
- * and those keep their place at the end instead of being dropped. Nothing here
- * can protect an edit made *while* a scan is running — that scan holds the
- * index in memory and its next flush wins.
+ * The stored index is re-read rather than taking the caller's copy: a scan in
+ * another tab may have appended pages since the caller loaded it, and those
+ * keep their place at the end instead of being dropped. Nothing here can
+ * protect an edit made *while* a scan runs — that scan holds the index in
+ * memory and its next flush wins.
  */
 export async function reorderCaptures(book: string, order: number[]): Promise<BookMeta> {
   const meta = await loadMeta(book);
@@ -209,14 +193,12 @@ export async function reorderCaptures(book: string, order: number[]): Promise<Bo
 }
 
 /**
- * Drop one capture, the page it points at, and its text layer. The index is
- * freed and may be handed out again: nextIndex only ever moves past the highest
- * one still present, so deleting the newest capture and scanning again writes to
- * that key afresh. Which is why OCR records are keyed by fingerprint too — see
- * ocrKey — and why this sweeps every record at the index rather than only the one
- * it can name. An OCR run in another tab may still be holding this capture and
- * store its words after this returns; that record is then unreachable, and the
- * next sweep or clearBook collects it.
+ * The index is freed and may be handed out again: nextIndex only moves past the
+ * highest one still present, so deleting the newest capture and scanning again
+ * writes to that key afresh. Hence the fingerprint in the OCR key — see ocrKey —
+ * and hence sweeping every record at the index rather than only the one this can
+ * name. An OCR run in another tab may store words for this capture after the
+ * sweep; that record is then unreachable, and clearBook collects it.
  */
 export async function deleteCapture(book: string, index: number): Promise<BookMeta> {
   const local = chrome.storage.local;
@@ -252,13 +234,8 @@ export async function clearBook(book: string): Promise<number> {
 }
 
 export function countDuplicates(captures: CaptureRecord[]): number {
-  const seen = new Set<string>();
   let duplicates = 0;
-  for (const capture of captures) {
-    if (!capture.fingerprint) continue;
-    if (seen.has(capture.fingerprint)) duplicates += 1;
-    seen.add(capture.fingerprint);
-  }
+  for (const count of fingerprintCounts(captures).values()) duplicates += count - 1;
   return duplicates;
 }
 

@@ -7,8 +7,6 @@ import { apply, notice, showTiming } from './render.ts';
 // A scan runs in the reader tab and the popup is a window onto it, so the
 // numbers have to arrive on their own rather than when a button is clicked.
 const POLL_MS = 1000;
-
-// How long "Clear this book" has to be held before it acts.
 const HOLD_MS = 2000;
 
 let currentBook: string | null = null;
@@ -74,8 +72,8 @@ async function refreshState(): Promise<void> {
 async function perform(run: () => Promise<string | null>): Promise<void> {
   try {
     const message = await run();
-    // Spoken, not assigned: the refresh below rewrites the status line from the
-    // state, and would erase the outcome of the action before it was read.
+    // notice(), not an assignment: the refresh below rewrites the status line
+    // from the state and would erase this before it was read.
     if (message !== null) notice(message);
     await refreshState();
   } catch (error) {
@@ -95,7 +93,7 @@ function onClick(button: HTMLButtonElement, run: () => Promise<string | null>): 
  * early is the cancel.
  */
 function holdToClear(button: HTMLButtonElement, run: () => Promise<string | null>): void {
-  // One source of truth for the duration: the bar's transition reads it back.
+  // The bar's CSS transition reads this back, so the duration is set once here.
   button.style.setProperty('--hold-ms', `${HOLD_MS}ms`);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -125,16 +123,14 @@ function holdToClear(button: HTMLButtonElement, run: () => Promise<string | null
   };
 
   button.addEventListener('pointerdown', start);
-  // pointerup and pointerleave both end a hold: sliding off the button is the
-  // other half of how people back out of one.
+  // Sliding off the button is the other half of how people back out of a hold.
   for (const event of ['pointerup', 'pointerleave', 'pointercancel']) {
     button.addEventListener(event, cancel);
   }
   // Nothing would end the hold if the popup lost focus mid-press.
   addEventListener('blur', cancel);
 
-  // Keyboard: a button that only responds to pointers cannot be reached by one.
-  // keydown repeats while a key is held, which start() ignores anyway.
+  // A button that only responds to pointers cannot be reached by keyboard.
   button.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') start();
   });
@@ -187,12 +183,9 @@ holdToClear(ui.clear, async () => (await send('clearCached')).message);
 
 /**
  * Every control writes through on change, so the popup reopens with what was
- * left set rather than the markup defaults. Starting a scan is no longer the
- * only thing that saves them.
- *
- * The pacing pair is also pushed to a scan already in flight: the settings used
- * to be read once at startup, so a scan turning out too fast could not be
- * slowed without stopping and resuming it.
+ * left set rather than the markup defaults. The pacing pair is also pushed to a
+ * scan already in flight, so a scan turning out too fast can be slowed without
+ * stopping and resuming it.
  */
 async function remember(pacing: boolean): Promise<void> {
   const options = uiOptions();
@@ -231,7 +224,6 @@ chrome.storage.local.get('options').then(({ options }: { options?: ScanOptions }
     // arrives second would otherwise win, and the cache is the authority.
     if (options.quality && !ui.quality.disabled) ui.quality.value = String(options.quality);
     if (options.split !== undefined && !ui.split.disabled) ui.split.checked = options.split;
-    // Never pinned by the cache, so unlike the pair above it is simply restored.
     if (isPaperName(options.paper)) ui.paper.value = options.paper;
     showTiming();
   }
@@ -240,8 +232,8 @@ chrome.storage.local.get('options').then(({ options }: { options?: ScanOptions }
 void refreshState();
 
 // Chrome destroys the popup when it closes, so this interval lives exactly as
-// long as the window it updates — there is nothing to tear down. Skipped while
-// a request is still out so a slow reader tab cannot queue them up.
+// long as the window it updates. Skipped while a request is still out, so a
+// slow reader tab cannot queue them up.
 let polling = false;
 setInterval(() => {
   if (polling) return;

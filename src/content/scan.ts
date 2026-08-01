@@ -42,7 +42,6 @@ export function requestStop(): void {
   stopRequested = true;
 }
 
-/** Exported so tests can name what settingsFrom returns and retune mutates. */
 export interface Settings {
   delay: number;
   /** 0–5. How much random extra time to add on top of `delay`. */
@@ -52,10 +51,9 @@ export interface Settings {
 }
 
 /**
- * Re-pace the scan that is already running, from the next wait onwards. Only
- * the two timing controls move: quality would leave one book holding pages
- * encoded two ways, and split decides the page boundaries the cache is keyed
- * on. Returns false when there was nothing to retune.
+ * Re-pace the running scan from its next wait onwards. Only the timing controls
+ * move: quality would leave one book holding pages encoded two ways, and split
+ * decides the page boundaries the cache is keyed on.
  */
 export function retune(options: ScanOptions | undefined): boolean {
   if (!live) return false;
@@ -77,14 +75,12 @@ export function settingsFrom(options: ScanOptions | undefined): Settings {
 
 /**
  * Watches for a reader that has stopped going anywhere new. The stall counter
- * next to it only compares against the previous view, so it cannot see a reader
- * that keeps changing without advancing — bouncing between the last page and a
- * trailing blank, or looping a section. Those show up as views this run has
- * already been given.
+ * only compares against the previous view, so it cannot see a reader that keeps
+ * changing without advancing — bouncing between the last page and a trailing
+ * blank, or looping a section.
  *
- * Deliberately scoped to the run, not to the cache: resuming a part-captured
- * book walks back over pages that are already stored, and every one of them is
- * new to this run, so re-treading is progress and does not count here.
+ * Scoped to the run, not to the cache: resuming a part-captured book walks back
+ * over pages that are already stored, and re-treading those is progress.
  */
 export function revisitWatch(limit: number = REVISIT_LIMIT) {
   const seen = new Set<string>();
@@ -117,10 +113,9 @@ interface ViewResult {
 
 /**
  * Reconcile the settings that belong to the whole book with what the cache was
- * already built with. The popup disables both controls once a book has pages,
- * so this is the backstop: it is what makes them properties of the cache rather
- * than of the run, whatever a stale message asks for. `settings` is adjusted in
- * place to what will actually be used.
+ * built with, adjusting `settings` in place. The popup disables both controls
+ * once a book has pages; this is the backstop that makes them properties of the
+ * cache rather than of the run, whatever a stale message asks for.
  */
 export function prepareBookMode(meta: BookMeta, settings: Settings): void {
   if (!meta.captures.length) {
@@ -261,16 +256,14 @@ async function performScan(book: string, options: ScanOptions | undefined): Prom
       continue;
     }
 
-    // The counter is recorded for display only. It skips and repeats as the
-    // reader reflows for the window width, so it decides nothing here: a stale
-    // repeat used to make the scan skip a view that had in fact moved on.
     const result = await captureRendered(meta, candidates, known, settings, position, index);
     index += result.stored;
     sinceFlush += result.stored;
     if (sinceFlush >= META_FLUSH_EVERY) await flush();
 
-    // Identical pixels are the only trustworthy evidence that the reader did
-    // not turn, so movement is decided by the hash rather than the counter.
+    // Movement is decided by the hash, never by the position counter: the
+    // counter skips and repeats as the reader reflows for the window width, and
+    // a stale repeat used to make the scan skip a view that had in fact moved.
     const moved = result.primary !== '' && result.primary !== lastView;
     if (result.primary) lastView = result.primary;
 
@@ -298,9 +291,8 @@ async function performScan(book: string, options: ScanOptions | undefined): Prom
     }
 
     const skipped = result.stored === 0 ? ' · nothing new on this view' : '';
-    // Only a page counter gives a meaningful "of N pages", and even that is
-    // approximate: the reader repaginates for the window size, so the number it
-    // reports is not a fixed property of the book.
+    // Approximate even for a page counter: the reader repaginates for the
+    // window size, so the total is not a fixed property of the book.
     const outOf = meta.kind === 'page' && meta.total ? ` of ~${meta.total}` : '';
     notify(`Cached ${meta.captures.length}${outOf} pages${skipped}`);
 

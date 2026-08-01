@@ -1,4 +1,5 @@
 import { clearBook, countDuplicates, loadMeta, recognisedIndexes } from '../shared/storage.ts';
+import { acquireBookScan, releaseBookScan } from '../shared/scan-lock.ts';
 import { saveCachedPdf } from '../pdf/export.ts';
 import { bookId, pageCandidates, readerPosition } from './dom.ts';
 import { notify, removeNoticeLater } from './notice.ts';
@@ -39,13 +40,35 @@ async function clearCached(book: string): Promise<ReaderMessage> {
   return { message };
 }
 
-function startScan(book: string, options: ScanOptions | undefined): ReaderMessage {
-  if (isRunning()) return { message: 'A scan is already running.' };
-  scan(book, options).catch((error: Error) => {
-    notify(`Scan failed: ${error.message}`);
-    removeNoticeLater();
-  });
-  return { message: 'Scan started. Watch the status in the reader tab.' };
+/**
+ * Held from the moment a start is accepted until scan() has set its own flag.
+ * isRunning() alone cannot close the gap: acquiring the lock is a round trip to
+ * the service worker, and a double-click sends two requests that both pass the
+ * check while the first is still waiting for its answer.
+ */
+let starting = false;
+
+async function startScan(book: string, options: ScanOptions | undefined): Promise<ReaderMessage> {
+  if (starting || isRunning()) return { message: 'A scan is already running.' };
+  starting = true;
+  try {
+    const token = crypto.randomUUID();
+    if (!await acquireBookScan(book, token)) {
+      return { message: 'This book is already being scanned in another reader tab.' };
+    }
+    // scan() sets isRunning() synchronously, before `starting` is dropped below.
+    void scan(book, options)
+      .catch((error: Error) => {
+        notify(`Scan failed: ${error.message}`);
+        removeNoticeLater();
+      })
+      .finally(() => releaseBookScan(book, token).catch((error) => {
+        console.warn('Could not release the scan lock', error);
+      }));
+    return { message: 'Scan started. Watch the status in the reader tab.' };
+  } finally {
+    starting = false;
+  }
 }
 
 chrome.runtime.onMessage.addListener((
@@ -57,8 +80,11 @@ chrome.runtime.onMessage.addListener((
 
   switch (request.action) {
     case 'startScan':
-      sendResponse(startScan(book, request.options));
-      return false;
+      startScan(book, request.options).then(
+        sendResponse,
+        (error: Error) => sendResponse({ error: `Scan could not start: ${error.message}` })
+      );
+      return true;
 
     case 'retune':
       sendResponse({
