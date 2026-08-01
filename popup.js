@@ -97,10 +97,12 @@
     if (!tab?.id || !isReaderUrl(tab.url)) {
       throw new Error("Open a book at read.amazon.com first.");
     }
-    return chrome.tabs.sendMessage(
+    const response = await chrome.tabs.sendMessage(
       tab.id,
       { action, ...extra }
     );
+    if ("error" in response) throw new Error(response.error);
+    return response;
   }
   function describe(error) {
     const message = error instanceof Error ? error.message : String(error);

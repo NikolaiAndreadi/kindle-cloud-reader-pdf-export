@@ -25,6 +25,7 @@ export const emptyMeta = (book: string): BookMeta => ({
   captures: [],
   total: null,
   kind: null,
+  split: null,
   turnStrategy: null
 });
 
@@ -32,7 +33,14 @@ export async function loadMeta(book: string): Promise<BookMeta> {
   const key = metaKey(book);
   const stored = await chrome.storage.local.get(key);
   const raw = stored[key] as BookMeta | undefined;
-  if (raw?.version === 2 && Array.isArray(raw.captures)) return raw;
+  if (raw?.version === 2 && Array.isArray(raw.captures)) {
+    // Caches written before split mode was recorded remain readable/exportable,
+    // but scan.ts will not append to them without knowing their page layout.
+    return {
+      ...raw,
+      split: typeof raw.split === 'boolean' ? raw.split : null
+    };
+  }
   return emptyMeta(book);
 }
 
@@ -79,10 +87,17 @@ export async function* pagesInBatches(
 }
 
 export async function clearBook(book: string): Promise<number> {
-  const meta = await loadMeta(book);
-  const keys = meta.captures.map((capture) => pageKey(book, capture.index));
-  await chrome.storage.local.remove([metaKey(book), ...keys]);
-  return meta.captures.length;
+  const local = chrome.storage.local;
+  // getKeys landed after the extension's minimum Chrome version. get(null) is
+  // the compatible fallback; clearing is deliberately the only path that may
+  // enumerate storage so interrupted, unindexed page writes can be removed.
+  const allKeys = typeof local.getKeys === 'function'
+    ? await local.getKeys()
+    : Object.keys(await local.get(null));
+  const prefix = `book:${book}:page:`;
+  const pages = allKeys.filter((key) => key.startsWith(prefix));
+  await local.remove([metaKey(book), ...pages]);
+  return pages.length;
 }
 
 export function countDuplicates(captures: CaptureRecord[]): number {

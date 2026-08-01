@@ -50,7 +50,7 @@ function startScan(book: string, options: ScanOptions | undefined): ReaderMessag
 chrome.runtime.onMessage.addListener((
   request: ReaderRequest,
   _sender: chrome.runtime.MessageSender,
-  sendResponse: (response: ReaderMessage | BookState) => void
+  sendResponse: (response: ReaderMessage | BookState | ReaderFailure) => void
 ): boolean => {
   const book = bookId();
 
@@ -65,19 +65,19 @@ chrome.runtime.onMessage.addListener((
       return false;
 
     case 'getState':
-      bookState(book).then(sendResponse, (error: Error) => sendResponse({ message: error.message }));
+      bookState(book).then(sendResponse, (error: Error) => sendResponse({ error: error.message }));
       return true;
 
     case 'saveCached':
-      saveCachedPdf(book).then(sendResponse, (error: Error) => sendResponse({ message: `Save failed: ${error.message}` }));
+      saveCachedPdf(book).then(sendResponse, (error: Error) => sendResponse({ error: `Save failed: ${error.message}` }));
       return true;
 
     case 'clearCached':
-      clearCached(book).then(sendResponse, (error: Error) => sendResponse({ message: `Clear failed: ${error.message}` }));
+      clearCached(book).then(sendResponse, (error: Error) => sendResponse({ error: `Clear failed: ${error.message}` }));
       return true;
 
     default:
-      sendResponse({ message: `Unknown action: ${(request as { action: string }).action}` });
+      sendResponse({ error: `Unknown action: ${(request as { action: string }).action}` });
       return false;
   }
 });

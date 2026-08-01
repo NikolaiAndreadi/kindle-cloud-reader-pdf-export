@@ -51,6 +51,20 @@ interface ViewResult {
   stored: number;
 }
 
+/** Refuse to append captures whose page boundaries differ from the cache. */
+export function prepareSplitMode(meta: BookMeta, split: boolean): void {
+  if (!meta.captures.length) {
+    meta.split = split;
+    return;
+  }
+  if (meta.split === null) {
+    throw new Error('This cache predates layout tracking. Save it or clear it before starting a new scan.');
+  }
+  if (meta.split !== split) {
+    throw new Error('The split setting differs from this cache. Clear the cached pages before changing it.');
+  }
+}
+
 /**
  * Capture everything rendered right now. Regions already in `known` are skipped
  * before encoding, so resuming a book costs a downscale per view rather than a
@@ -118,12 +132,10 @@ async function captureRendered(
   return { primary, stored };
 }
 
-export async function scan(book: string, options: ScanOptions | undefined): Promise<void> {
-  running = true;
-  stopRequested = false;
-
+async function performScan(book: string, options: ScanOptions | undefined): Promise<void> {
   const settings = settingsFrom(options);
   const meta = await loadMeta(book);
+  prepareSplitMode(meta, settings.split);
   const known = new Set(meta.captures.map((capture) => capture.fingerprint).filter(Boolean));
   const startCount = meta.captures.length;
   const prober = turnProber(meta.turnStrategy);
@@ -226,6 +238,17 @@ export async function scan(book: string, options: ScanOptions | undefined): Prom
 
   await flush();
   notify(outcome);
-  running = false;
   removeNoticeLater();
+}
+
+export async function scan(book: string, options: ScanOptions | undefined): Promise<void> {
+  running = true;
+  stopRequested = false;
+  try {
+    await performScan(book, options);
+  } finally {
+    // Storage and DOM operations can reject. Never make a transient failure
+    // permanently block scan, clear, and retry until the reader tab is reloaded.
+    running = false;
+  }
 }

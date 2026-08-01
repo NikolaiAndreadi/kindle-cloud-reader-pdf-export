@@ -16,9 +16,11 @@ async function send<A extends ReaderAction>(
   if (!tab?.id || !isReaderUrl(tab.url)) {
     throw new Error('Open a book at read.amazon.com first.');
   }
-  return chrome.tabs.sendMessage<ReaderRequest, ReaderReplies[A]>(
+  const response = await chrome.tabs.sendMessage<ReaderRequest, ReaderReplies[A] | ReaderFailure>(
     tab.id, { action, ...extra } as ReaderRequest
   );
+  if ('error' in response) throw new Error(response.error);
+  return response;
 }
 
 /**

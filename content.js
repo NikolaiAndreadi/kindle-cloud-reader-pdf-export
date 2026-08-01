@@ -11,13 +11,19 @@
     captures: [],
     total: null,
     kind: null,
+    split: null,
     turnStrategy: null
   });
   async function loadMeta(book) {
     const key = metaKey(book);
     const stored = await chrome.storage.local.get(key);
     const raw = stored[key];
-    if (raw?.version === 2 && Array.isArray(raw.captures)) return raw;
+    if (raw?.version === 2 && Array.isArray(raw.captures)) {
+      return {
+        ...raw,
+        split: typeof raw.split === "boolean" ? raw.split : null
+      };
+    }
     return emptyMeta(book);
   }
   var saveMeta = (meta) => chrome.storage.local.set({ [metaKey(meta.bookId)]: meta });
@@ -44,10 +50,12 @@
     }
   }
   async function clearBook(book) {
-    const meta = await loadMeta(book);
-    const keys = meta.captures.map((capture) => pageKey(book, capture.index));
-    await chrome.storage.local.remove([metaKey(book), ...keys]);
-    return meta.captures.length;
+    const local = chrome.storage.local;
+    const allKeys = typeof local.getKeys === "function" ? await local.getKeys() : Object.keys(await local.get(null));
+    const prefix = `book:${book}:page:`;
+    const pages = allKeys.filter((key) => key.startsWith(prefix));
+    await local.remove([metaKey(book), ...pages]);
+    return pages.length;
   }
   function countDuplicates(captures) {
     const seen = /* @__PURE__ */ new Set();
@@ -548,6 +556,18 @@ ${xref}
       split: options?.split !== false
     };
   }
+  function prepareSplitMode(meta, split) {
+    if (!meta.captures.length) {
+      meta.split = split;
+      return;
+    }
+    if (meta.split === null) {
+      throw new Error("This cache predates layout tracking. Save it or clear it before starting a new scan.");
+    }
+    if (meta.split !== split) {
+      throw new Error("The split setting differs from this cache. Clear the cached pages before changing it.");
+    }
+  }
   async function captureRendered(meta, candidates, known, settings, position, startIndex) {
     const key = positionKey(position);
     let primary = "";
@@ -596,11 +616,10 @@ ${xref}
     }
     return { primary, stored };
   }
-  async function scan(book, options) {
-    running = true;
-    stopRequested = false;
+  async function performScan(book, options) {
     const settings = settingsFrom(options);
     const meta = await loadMeta(book);
+    prepareSplitMode(meta, settings.split);
     const known = new Set(meta.captures.map((capture) => capture.fingerprint).filter(Boolean));
     const startCount = meta.captures.length;
     const prober = turnProber(meta.turnStrategy);
@@ -676,8 +695,16 @@ ${xref}
     }
     await flush();
     notify(outcome);
-    running = false;
     removeNoticeLater();
+  }
+  async function scan(book, options) {
+    running = true;
+    stopRequested = false;
+    try {
+      await performScan(book, options);
+    } finally {
+      running = false;
+    }
   }
 
   // src/content/main.ts
@@ -727,16 +754,16 @@ ${xref}
         sendResponse({ message: isRunning() ? "Stopping…" : "No scan is running." });
         return false;
       case "getState":
-        bookState(book).then(sendResponse, (error) => sendResponse({ message: error.message }));
+        bookState(book).then(sendResponse, (error) => sendResponse({ error: error.message }));
         return true;
       case "saveCached":
-        saveCachedPdf(book).then(sendResponse, (error) => sendResponse({ message: `Save failed: ${error.message}` }));
+        saveCachedPdf(book).then(sendResponse, (error) => sendResponse({ error: `Save failed: ${error.message}` }));
         return true;
       case "clearCached":
-        clearCached(book).then(sendResponse, (error) => sendResponse({ message: `Clear failed: ${error.message}` }));
+        clearCached(book).then(sendResponse, (error) => sendResponse({ error: `Clear failed: ${error.message}` }));
         return true;
       default:
-        sendResponse({ message: `Unknown action: ${request.action}` });
+        sendResponse({ error: `Unknown action: ${request.action}` });
         return false;
     }
   });

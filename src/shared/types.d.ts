@@ -37,6 +37,8 @@ interface BookMeta {
   captures: CaptureRecord[];
   total: number | null;
   kind: 'page' | 'location' | null;
+  /** Split setting used to create this cache; null means legacy/unknown. */
+  split: boolean | null;
   /** Which page-turn strategy worked for this book, so later scans skip probing. */
   turnStrategy: string | null;
 }
@@ -138,6 +140,11 @@ type ReaderAction = ReaderRequest['action'];
 
 interface ReaderMessage {
   message: string;
+}
+
+/** An action that failed before it could produce its normal reply. */
+interface ReaderFailure {
+  error: string;
 }
 
 /** Reply type for each action, so callers know what they get back. */

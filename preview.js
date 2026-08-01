@@ -10,13 +10,19 @@
     captures: [],
     total: null,
     kind: null,
+    split: null,
     turnStrategy: null
   });
   async function loadMeta(book2) {
     const key = metaKey(book2);
     const stored = await chrome.storage.local.get(key);
     const raw = stored[key];
-    if (raw?.version === 2 && Array.isArray(raw.captures)) return raw;
+    if (raw?.version === 2 && Array.isArray(raw.captures)) {
+      return {
+        ...raw,
+        split: typeof raw.split === "boolean" ? raw.split : null
+      };
+    }
     return emptyMeta(book2);
   }
   async function* pagesInBatches(book2, captures, size = READ_BATCH) {

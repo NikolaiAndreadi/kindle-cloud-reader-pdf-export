@@ -10,7 +10,8 @@ import {
 function fakeStorage() {
   const data = new Map<string, unknown>();
   const local = {
-    get: async (keys: string | string[]) => {
+    get: async (keys: string | string[] | null) => {
+      if (keys === null) return Object.fromEntries(data);
       const list = typeof keys === 'string' ? [keys] : keys;
       return Object.fromEntries(
         list.filter((key) => data.has(key)).map((key) => [key, data.get(key)])
@@ -19,6 +20,7 @@ function fakeStorage() {
     set: async (items: Record<string, unknown>) => {
       for (const [key, value] of Object.entries(items)) data.set(key, value);
     },
+    getKeys: async () => [...data.keys()],
     remove: async (keys: string[]) => {
       for (const key of keys) data.delete(key);
     }
@@ -182,5 +184,14 @@ describe('clearBook', () => {
 
     await clearBook('B001');
     assert.equal((await loadMeta('B002')).captures.length, 1);
+  });
+
+  it('removes page writes that were not flushed into the metadata index', async () => {
+    const meta = emptyMeta('B001');
+    await storePage(meta, capture(1), image());
+
+    assert.equal(data.has(metaKey('B001')), false);
+    assert.equal(await clearBook('B001'), 1);
+    assert.equal(data.has(pageKey('B001', 1)), false);
   });
 });
