@@ -337,6 +337,22 @@ ${xref}
     return candidates.filter((candidate) => candidate.area >= largest * DOMINANT_AREA_RATIO).sort((a, b) => a.rect.left - b.rect.left || a.rect.top - b.rect.top);
   }
 
+  // src/shared/timing.ts
+  var DELAY_MIN = 700;
+  var DELAY_MAX = 2e3;
+  var DELAY_DEFAULT = 1100;
+  var JITTER_MIN = 0;
+  var JITTER_MAX = 5;
+  var JITTER_DEFAULT = 2;
+  var JITTER_SHARE = 0.2;
+  var clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+  var clampDelay = (ms) => clamp(Number(ms) || DELAY_DEFAULT, DELAY_MIN, DELAY_MAX);
+  function clampJitter(level) {
+    const value = Number(level);
+    return Number.isFinite(value) ? clamp(Math.round(value), JITTER_MIN, JITTER_MAX) : JITTER_DEFAULT;
+  }
+  var jitteredDelay = (base, level, roll = Math.random()) => Math.round(base * (1 + JITTER_SHARE * level * roll));
+
   // src/content/capture.ts
   var DEFAULT_BACKGROUND = "#ffffff";
   var DECODE_TIMEOUT = 3e3;
@@ -431,22 +447,6 @@ ${xref}
     context.drawImage(element, sx, sy, sw, sh, 0, 0, sw, sh);
     return { width: sw, height: sh, dataUrl: canvas.toDataURL("image/jpeg", quality) };
   }
-
-  // src/shared/timing.ts
-  var DELAY_MIN = 700;
-  var DELAY_MAX = 2e3;
-  var DELAY_DEFAULT = 1100;
-  var JITTER_MIN = 0;
-  var JITTER_MAX = 5;
-  var JITTER_DEFAULT = 2;
-  var JITTER_SHARE = 0.2;
-  var clamp = (value, low, high) => Math.min(high, Math.max(low, value));
-  var clampDelay = (ms) => clamp(Number(ms) || DELAY_DEFAULT, DELAY_MIN, DELAY_MAX);
-  function clampJitter(level) {
-    const value = Number(level);
-    return Number.isFinite(value) ? clamp(Math.round(value), JITTER_MIN, JITTER_MAX) : JITTER_DEFAULT;
-  }
-  var jitteredDelay = (base, level, roll = Math.random()) => Math.round(base * (1 + JITTER_SHARE * level * roll));
 
   // src/content/turning.ts
   function sendArrowRight(target) {
@@ -727,8 +727,6 @@ ${xref}
     const meta = await loadMeta(book);
     const position = readerPosition();
     const candidates = pageCandidates();
-    const first = candidates[0];
-    const size = first ? naturalSize(first.element) : null;
     const kind = meta.kind ?? position?.kind ?? null;
     return {
       bookId: meta.bookId,
@@ -738,8 +736,7 @@ ${xref}
       total: kind === "page" ? meta.total ?? position?.total ?? null : null,
       kind,
       position,
-      duplicates: countDuplicates(meta.captures),
-      wideView: size ? isWide(size.width, size.height) : false
+      duplicates: countDuplicates(meta.captures)
     };
   }
   async function clearCached(book) {

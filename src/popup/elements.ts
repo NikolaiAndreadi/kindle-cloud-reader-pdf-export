@@ -7,7 +7,6 @@ function required<T extends Element>(selector: string): T {
 export const ui = {
   status: required<HTMLParagraphElement>('#status'),
   cache: required<HTMLParagraphElement>('#cache'),
-  layout: required<HTMLParagraphElement>('#layout'),
   delay: required<HTMLInputElement>('#delay'),
   delayValue: required<HTMLOutputElement>('#delayValue'),
   jitter: required<HTMLInputElement>('#jitter'),

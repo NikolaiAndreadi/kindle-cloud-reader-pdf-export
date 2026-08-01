@@ -131,8 +131,6 @@ interface BookState {
   position: ReaderPosition | null;
   /** Captures whose image bytes are identical to another capture. */
   duplicates: number;
-  /** True when the rendered view is landscape, i.e. a two-column spread. */
-  wideView: boolean;
 }
 
 type ReaderRequest =

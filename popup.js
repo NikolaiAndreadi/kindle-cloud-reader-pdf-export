@@ -51,7 +51,6 @@
   var ui = {
     status: required("#status"),
     cache: required("#cache"),
-    layout: required("#layout"),
     delay: required("#delay"),
     delayValue: required("#delayValue"),
     jitter: required("#jitter"),
@@ -83,10 +82,6 @@
     }
     return "Ready to scan.";
   }
-  function layoutFor(state, splitting) {
-    if (!state.wideView) return "Single-column layout detected — one PDF page per book page.";
-    return splitting ? "Two-column layout detected — each spread will be split into two pages." : "Two-column layout detected — each PDF page will hold two book pages.";
-  }
   function cacheFor(state) {
     if (!state.count) return `No saved pages yet · ${state.bookId}`;
     const dupes = state.duplicates ? ` · ${plural(state.duplicates, "duplicate")}` : "";
@@ -101,14 +96,12 @@
     ui.stop.disabled = !state?.scanning;
     ui.save.disabled = !state?.count;
     ui.clear.disabled = !state?.count || state.scanning;
-    ui.layout.hidden = !ready;
     if (!state) {
       ui.status.textContent = problem || "Open read.amazon.com to begin.";
       ui.cache.textContent = "";
       return;
     }
     ui.status.textContent = statusFor(state);
-    if (ready) ui.layout.textContent = layoutFor(state, ui.split.checked);
     ui.cache.textContent = cacheFor(state);
   }
 
@@ -198,7 +191,6 @@
     if (!confirm("Delete all captured pages stored for this book?")) return null;
     return (await send("clearCached")).message;
   });
-  ui.split.addEventListener("change", () => void refreshState());
   for (const slider of [ui.delay, ui.jitter]) {
     slider.addEventListener("input", showTiming);
   }

@@ -1,7 +1,6 @@
 import { clearBook, countDuplicates, loadMeta } from '../shared/storage.ts';
 import { saveCachedPdf } from '../pdf/export.ts';
 import { bookId, pageCandidates, readerPosition } from './dom.ts';
-import { isWide, naturalSize } from './capture.ts';
 import { notify, removeNoticeLater } from './notice.ts';
 import { isRunning, requestStop, scan } from './scan.ts';
 
@@ -10,8 +9,6 @@ async function bookState(book: string): Promise<BookState> {
   const position = readerPosition();
   // One query: each call may walk shadow roots and same-origin iframes.
   const candidates = pageCandidates();
-  const first = candidates[0];
-  const size = first ? naturalSize(first.element) : null;
   // A "Location 4879 of 4879" book has no page count, and reporting locations
   // as pages would be nonsense, so a total is only offered for page counters.
   const kind = meta.kind ?? position?.kind ?? null;
@@ -24,8 +21,7 @@ async function bookState(book: string): Promise<BookState> {
     total: kind === 'page' ? (meta.total ?? position?.total ?? null) : null,
     kind,
     position,
-    duplicates: countDuplicates(meta.captures),
-    wideView: size ? isWide(size.width, size.height) : false
+    duplicates: countDuplicates(meta.captures)
   };
 }
 

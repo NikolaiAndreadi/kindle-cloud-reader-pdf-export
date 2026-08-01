@@ -111,8 +111,6 @@ onClick(ui.clear, async () => {
   return (await send('clearCached')).message;
 });
 
-ui.split.addEventListener('change', () => void refreshState());
-
 for (const slider of [ui.delay, ui.jitter]) {
   slider.addEventListener('input', showTiming);
 }

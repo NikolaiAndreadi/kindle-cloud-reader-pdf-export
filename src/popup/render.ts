@@ -27,14 +27,6 @@ function statusFor(state: BookState): string {
   return 'Ready to scan.';
 }
 
-// Saying so up front saves a wasted scan and a trip to the reader settings.
-function layoutFor(state: BookState, splitting: boolean): string {
-  if (!state.wideView) return 'Single-column layout detected — one PDF page per book page.';
-  return splitting
-    ? 'Two-column layout detected — each spread will be split into two pages.'
-    : 'Two-column layout detected — each PDF page will hold two book pages.';
-}
-
 function cacheFor(state: BookState): string {
   if (!state.count) return `No saved pages yet · ${state.bookId}`;
   const dupes = state.duplicates ? ` · ${plural(state.duplicates, 'duplicate')}` : '';
@@ -58,7 +50,6 @@ export function apply(state: BookState | null, problem?: string): void {
   ui.stop.disabled = !state?.scanning;
   ui.save.disabled = !state?.count;
   ui.clear.disabled = !state?.count || state.scanning;
-  ui.layout.hidden = !ready;
 
   if (!state) {
     ui.status.textContent = problem || 'Open read.amazon.com to begin.';
@@ -67,6 +58,5 @@ export function apply(state: BookState | null, problem?: string): void {
   }
 
   ui.status.textContent = statusFor(state);
-  if (ready) ui.layout.textContent = layoutFor(state, ui.split.checked);
   ui.cache.textContent = cacheFor(state);
 }
