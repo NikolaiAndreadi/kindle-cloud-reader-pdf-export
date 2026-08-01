@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cloud Reader Export — offline fixture</title>
+<style>
+  body { margin: 0; font: 13px/1.5 system-ui, sans-serif; background: #2a2a2a; color: #eee; }
+  #kr-renderer { position: absolute; left: 24px; top: 56px; width: 580px; height: 362px; }
+  .kg-view { position: absolute; }
+  .kg-full-page-img img { object-fit: cover; object-position: center top; width: 580px; height: 362px; }
+  .panel { position: fixed; left: 24px; top: 440px; width: 580px; }
+  .panel button { font: inherit; padding: 6px 10px; margin: 0 4px 6px 0; }
+  pre { background: #111; padding: 10px; border-radius: 6px; max-height: 220px; overflow: auto; font-size: 11px; }
+  .footer-note { position: fixed; left: 24px; top: 16px; opacity: .75; }
+</style>
+</head>
+<body>
+
+<div class="footer-note">Offline fixture — real reader markup, synthetic pages. No Amazon account needed.</div>
+
+<!-- Markup below mirrors the structure captured from a live read.amazon.com tab. -->
+<div id="root">
+  <div class="kr-renderer-container-fullpage" style="overflow: hidden;">
+    <div id="kr-renderer" class=" kg-client-root kg-client-theme--default">
+      <div class=" kg-view ">
+        <div aria-hidden="true" style="display: flex;">
+          <div class="kg-full-page-img" data-background-color="#ffffffff" style="pointer-events: none;">
+            <img id="page-img" alt="">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div data-testid="footer" class=" footer-label-color-default">
+  <ion-footer item-i-d="reader-footer" class="ion-no-border reader-footer">
+    <ion-toolbar>
+      <ion-title item-i-d="reader-footer-title" class="footer-label position">
+        <div class="text-div" id="counter">Page 1 of 8 <span class="footer-label-dot-size">●</span> 1%</div>
+      </ion-title>
+    </ion-toolbar>
+  </ion-footer>
+</div>
+
+<div class="panel">
+  <button data-action="startScan">Scan / resume</button>
+  <button data-action="stopScan">Stop</button>
+  <button data-action="saveCached">Save PDF</button>
+  <button data-action="clearCached">Clear</button>
+  <button data-action="getState">State</button>
+  <button id="dump">Dump storage</button>
+  <pre id="log">ready</pre>
+</div>
+
+<script>
+// ---- Minimal stand-ins for the two extension APIs content.js uses -----------
+const memory = new Map();
+const listeners = [];
+window.chrome = {
+  storage: { local: {
+    get: async (keys) => {
+      const list = keys === null ? [...memory.keys()] : (typeof keys === 'string' ? [keys] : keys);
+      const out = {};
+      for (const key of list) if (memory.has(key)) out[key] = structuredClone(memory.get(key));
+      return out;
+    },
+    set: async (items) => { for (const [k, v] of Object.entries(items)) memory.set(k, structuredClone(v)); },
+    remove: async (keys) => { for (const key of [].concat(keys)) memory.delete(key); }
+  } },
+  runtime: { onMessage: { addListener: (fn) => listeners.push(fn) } }
+};
+
+// ---- A fake book: 8 distinct pages, drawn at 1200x1600 natural size ---------
+const TOTAL = 8;
+let current = 1;
+const pageImg = document.getElementById('page-img');
+const counter = document.getElementById('counter');
+const log = document.getElementById('log');
+
+function drawPage(number) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 1600;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, 1200, 1600);
+  ctx.fillStyle = '#111';
+  ctx.font = 'bold 130px Georgia, serif';
+  ctx.fillText(`Page ${number}`, 90, 220);
+  ctx.font = '38px Georgia, serif';
+  for (let line = 0; line < 22; line++) {
+    ctx.fillText(`${number}·${line} the quick brown fox jumps over the lazy dog`, 90, 340 + line * 54);
+  }
+  return canvas.toDataURL('image/png');
+}
+
+function render() {
+  pageImg.src = drawPage(current);
+  counter.textContent = `Page ${current} of ${TOTAL} ● ${Math.round(current / TOTAL * 100)}%`;
+}
+render();
+
+// The content script turns pages by dispatching ArrowRight on document.
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'ArrowRight') return;
+  if (current < TOTAL) { current += 1; render(); }
+});
+
+// ---- Drive the content script's message handler ----------------------------
+function show(value) { log.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); }
+for (const button of document.querySelectorAll('.panel button[data-action]')) {
+  button.addEventListener('click', () => {
+    const action = button.dataset.action;
+    const request = action === 'startScan' ? { action, options: { delay: 500, quality: .88 } } : { action };
+    listeners[0](request, null, (response) => show(response));
+  });
+}
+document.getElementById('dump').addEventListener('click', async () => {
+  const all = await chrome.storage.local.get(null);
+  show(Object.entries(all).map(([key, value]) =>
+    key.includes(':page:')
+      ? `${key}  ${value.width}x${value.height}  ${Math.round(value.dataUrl.length / 1024)} KB`
+      : `${key}  ${JSON.stringify(value)}`
+  ).join('\n') || '(empty)');
+});
+</script>
+
+<!-- The real compiled content script, unmodified. -->
+<script src="../content.js"></script>
+</body>
+</html>
