@@ -10,43 +10,49 @@
     <main>
       <h1>Cloud Reader Export</h1>
       <p id="status">Open a book and start scanning.</p>
-      <label class="slider">
-        <span>Page delay <output id="delayValue" for="delay">1.1 s</output></span>
-        <!-- step 100 so every stop has its own label: at 50 both 1.35 s and
-             1.4 s would read "1.4 s". -->
-        <input type="range" id="delay" min="700" max="2000" step="100" value="1100">
-      </label>
-      <label class="slider">
-        <span>Delay jitter <output id="jitterValue" for="jitter delay">off</output></span>
-        <input type="range" id="jitter" min="0" max="5" step="1" value="2">
-      </label>
-      <!-- Both of these describe the cache rather than one run, so they are
-           grouped: the note and the disabled state apply to the pair. -->
-      <div id="bookOptions">
-        <label>
-          JPEG quality
-          <select id="quality">
-            <option value="0.75">Low</option>
-            <option value="0.88" selected>Balanced</option>
-            <option value="0.96">High</option>
-          </select>
+      <!-- The only control that makes sense away from the reader, so it sits
+           outside #controls: exactly one of the two is ever shown. Both start
+           hidden so the first paint cannot show the wrong half for a frame —
+           the status line above carries the popup until the state arrives. -->
+      <button id="open" class="secondary" hidden>Open read.amazon.com</button>
+      <div id="controls" hidden>
+        <label class="slider">
+          <span>Page delay <output id="delayValue" for="delay">1.1 s</output></span>
+          <!-- step 100 so every stop has its own label: at 50 both 1.35 s and
+               1.4 s would read "1.4 s". -->
+          <input type="range" id="delay" min="700" max="2000" step="100" value="1100">
         </label>
-        <label class="check">
-          <input type="checkbox" id="split" checked>
-          Split two-page spreads
+        <label class="slider">
+          <span>Delay jitter <output id="jitterValue" for="jitter delay">off</output></span>
+          <input type="range" id="jitter" min="0" max="5" step="1" value="2">
         </label>
+        <!-- Both of these describe the cache rather than one run, so they are
+             grouped: the note and the disabled state apply to the pair. -->
+        <div id="bookOptions">
+          <label>
+            JPEG quality
+            <select id="quality">
+              <option value="0.75">Low</option>
+              <option value="0.88" selected>Balanced</option>
+              <option value="0.96">High</option>
+            </select>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="split" checked>
+            Split two-page spreads
+          </label>
+        </div>
+        <p id="bookNote" class="hint">Set once per book: the first scan fixes both for every page it captures.</p>
+        <div class="actions">
+          <button id="start">Scan / resume</button>
+          <button id="stop" class="secondary">Stop</button>
+          <button id="save" class="secondary">Save cached pages as PDF</button>
+          <button id="preview" class="secondary" hidden>See captured pages</button>
+          <button id="clear" class="danger" title="Hold to clear">Clear this book</button>
+        </div>
+        <p id="cache" class="cache">Checking saved pages…</p>
+        <p class="hint">Captured pages remain stored for this book. Reopen it later and resume without losing earlier pages.</p>
       </div>
-      <p id="bookNote" class="hint">Set once per book: the first scan fixes both for every page it captures.</p>
-      <div class="actions">
-        <button id="open" class="secondary">Open read.amazon.com</button>
-        <button id="start">Scan / resume</button>
-        <button id="stop" class="secondary">Stop</button>
-        <button id="save" class="secondary">Save cached pages as PDF</button>
-        <button id="preview" class="secondary" hidden>See captured pages</button>
-        <button id="clear" class="danger" title="Hold to clear">Clear this book</button>
-      </div>
-      <p id="cache" class="cache">Checking saved pages…</p>
-      <p class="hint">Captured pages remain stored for this book. Reopen it later and resume without losing earlier pages.</p>
     </main>
     <script src="popup.js"></script>
   </body>

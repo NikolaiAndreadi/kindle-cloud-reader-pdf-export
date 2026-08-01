@@ -11,6 +11,9 @@ label.slider span { display: flex; justify-content: space-between; gap: 8px; }
 label.slider output { opacity: .7; font-variant-numeric: tabular-nums; }
 input[type="range"] { width: 100%; margin: 0; accent-color: #ff9900; }
 .actions { display: grid; gap: 8px; margin-top: 16px; }
+/* Stands alone rather than inside .actions, so it needs that block's sizing. */
+#open { display: block; width: 100%; margin-top: 16px; }
+#open[hidden] { display: none; }
 button { border: 0; border-radius: 6px; background: #ff9900; color: #161616; font-weight: 650; cursor: pointer; }
 button.secondary { background: #7773; color: inherit; }
 button.danger { background: #b3261e; color: #fff; }

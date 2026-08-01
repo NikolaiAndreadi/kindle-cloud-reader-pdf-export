@@ -90,15 +90,27 @@ function lockBookOptions(state: BookState | null): void {
  * telling someone to open a book when they are already reading one, and no
  * point offering a scan when nothing is rendered.
  */
-export function apply(state: BookState | null, problem?: string): void {
+export function apply(state: BookState | null, onReader: boolean, problem?: string): void {
   const ready = state?.bookOpen === true;
   // Everything else here is a description of the current state and is safe to
   // rewrite every tick. Only the status line can be holding a message.
   const spoken = Date.now() < noticeUntil;
 
-  lockBookOptions(state);
+  // Three states, and the status line is the one thing common to all of them:
+  //
+  //   off the reader   status + the button that goes there
+  //   no book rendered status only — the controls have nothing to act on, and
+  //                    the button would point at the tab already in front of you
+  //   book rendered    status + the controls
+  //
+  // Whether the site is the reader comes from the tab's URL rather than from
+  // whether getState answered: a reader tab that predates the extension has no
+  // content script, and offering "Open read.amazon.com" there would point at
+  // itself when the answer in the status line is "reload this tab".
+  ui.open.hidden = onReader;
+  ui.controls.hidden = !ready;
 
-  ui.open.hidden = ready;
+  lockBookOptions(state);
   ui.preview.hidden = !state?.count;
   ui.start.disabled = !ready;
   ui.stop.disabled = !state?.scanning;

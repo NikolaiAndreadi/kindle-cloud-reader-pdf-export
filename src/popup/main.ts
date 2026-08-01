@@ -51,13 +51,19 @@ function describe(error: unknown): string {
 }
 
 async function refreshState(): Promise<void> {
+  // Inside the try, and read before asking the tab anything: what the popup
+  // shows depends on where the tab is, which is knowable even when the tab
+  // cannot answer — and apply() has to run on every path, or the popup is left
+  // showing the neither-state it starts in.
+  let onReader = false;
   try {
+    onReader = isReaderUrl((await activeTab())?.url);
     const state = await send('getState');
     currentBook = state.bookId;
-    apply(state);
+    apply(state, onReader);
   } catch (error) {
     currentBook = null;
-    apply(null, describe(error));
+    apply(null, onReader, describe(error));
   }
 }
 

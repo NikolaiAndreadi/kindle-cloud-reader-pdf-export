@@ -50,6 +50,7 @@
   }
   var ui = {
     status: required("#status"),
+    controls: required("#controls"),
     cache: required("#cache"),
     delay: required("#delay"),
     delayValue: required("#delayValue"),
@@ -106,11 +107,12 @@
     const choice = [...ui.quality.options].find((option) => Number(option.value) === state.quality);
     if (choice) ui.quality.value = choice.value;
   }
-  function apply(state, problem) {
+  function apply(state, onReader, problem) {
     const ready = state?.bookOpen === true;
     const spoken = Date.now() < noticeUntil;
+    ui.open.hidden = onReader;
+    ui.controls.hidden = !ready;
     lockBookOptions(state);
-    ui.open.hidden = ready;
     ui.preview.hidden = !state?.count;
     ui.start.disabled = !ready;
     ui.stop.disabled = !state?.scanning;
@@ -156,13 +158,15 @@
     return /Could not establish connection|Receiving end does not exist/i.test(message) ? "Reload the reader tab, then try again — the extension was not loaded when the page opened." : message;
   }
   async function refreshState() {
+    let onReader = false;
     try {
+      onReader = isReaderUrl((await activeTab())?.url);
       const state = await send("getState");
       currentBook = state.bookId;
-      apply(state);
+      apply(state, onReader);
     } catch (error) {
       currentBook = null;
-      apply(null, describe(error));
+      apply(null, onReader, describe(error));
     }
   }
   async function perform(run) {
