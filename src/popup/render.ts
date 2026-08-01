@@ -52,7 +52,14 @@ function cacheFor(state: BookState): string {
   // state.total is null for location-counted books, so this never claims a page
   // count the reader never gave us.
   const outOf = state.total ? ` of ~${state.total}` : '';
-  return `${plural(state.count, 'saved view')}${outOf}${dupes} · ${state.bookId}`;
+  // OCR is run from the preview page, so all the popup owes anyone is how much
+  // of the book will come out searchable if they export it now.
+  const text = state.recognised === state.count
+    ? ' · all searchable'
+    : state.recognised
+      ? ` · ${state.recognised}/${state.count} searchable`
+      : ' · no text layer yet';
+  return `${plural(state.count, 'saved view')}${outOf}${dupes}${text} · ${state.bookId}`;
 }
 
 /**

@@ -1,9 +1,11 @@
 # Personal Cloud Reader Export
 
 A small Chrome extension that captures pages already rendered by Kindle Cloud
-Reader and saves them as an image-based PDF. It does not download Kindle book
-files, decrypt content, or communicate with any third-party service. Use it
-only for books and material you are authorized to copy.
+Reader and saves them as a PDF on a real paper size, optionally with an invisible
+OCR text layer so the pages are searchable and selectable. It does not download
+Kindle book files, decrypt content, or communicate with any third-party service —
+the OCR engine is bundled and runs locally. Use it only for books and material
+you are authorized to copy.
 
 ## Build
 
@@ -18,7 +20,14 @@ npm run build
 - `npm run lint` — Biome; `npm run lint:fix` applies what it can
 - `npm test` — unit tests for the pure logic
 - `npm run check` — typecheck, lint and test together
-- `npm run fixture` — serves this directory on port 8973 for the offline test page
+- `npm run vendor` — re-copies the OCR engine from `node_modules` into `vendor/tesseract`
+- `npm run fixture` — serves this directory on port 8973 for the offline test pages:
+  `test/fixture.html` for scanning, `test/ocr-fixture.html` for the OCR engine
+
+`vendor/tesseract` is checked in so **Load unpacked** works on a fresh clone with no
+build. Only `npm run vendor` should write to it; the build fails if a file is missing.
+Licenses and exact upstream versions are listed in
+`vendor/tesseract/THIRD_PARTY_NOTICES.md` and ship with the runtime assets.
 
 ## Install
 
@@ -29,7 +38,9 @@ npm run build
    `read.amazon.co.uk` and `read.amazon.com.br` work too).
 5. Click the extension and choose **Scan / resume**.
 6. Stop whenever you like; the captured pages remain cached per book.
-7. Choose **Save cached pages as PDF** when ready.
+7. Optionally choose **See captured pages** → **Add searchable text (OCR)** and
+   leave that tab open while it works.
+8. Pick a **PDF page size**, then choose **Save cached pages as PDF**.
 
 Keep the reader tab visible until the download begins. If pages are skipped, choose
 the slower page delay.
@@ -73,3 +84,43 @@ actually moves the reader, and records it so later scans skip the probing.
 The scan stops on its own when the reader stops advancing, when the page count is
 reached, when no page-turn method works, when pages cannot be copied at all, or
 when you press **Stop**.
+
+## Page size
+
+Captures are whatever pixel size the reader happened to paint, which used to become
+the PDF page size — a stack of pages no printer or e-reader had a name for. Every
+page is now written on one sheet: **A4**, **US Letter**, or **Match capture** for
+the old behaviour. The bitmap is fitted inside the sheet and centred, so a shape
+that does not match leaves even bands rather than being cropped or stretched, and
+the sheet takes the orientation of the capture — a spread saved without splitting
+gets a landscape page instead of half a portrait one.
+
+## Searchable text
+
+The reader paints pages as images, so there is no text in the DOM to copy: the only
+route to a text layer is to read the pixels back. **Add searchable text (OCR)** in
+the preview page runs Tesseract over each cached page and stores the words with
+their positions. Exporting then draws them over the image in PDF rendering mode 3 —
+shaped but never painted — which is exactly what a scanner means by a searchable
+PDF. The page still looks like the capture; selecting, copying and Ctrl-F reach the
+words underneath.
+
+OCR runs in the preview tab because it needs a WebAssembly engine, which an
+extension page can load and a content script cannot, and because it needs somewhere
+that stays open — roughly a second and a half a page, so ten to twenty minutes for
+a long book. That tab does not have to be the visible one. It is resumable and
+interruptible: results are stored per page as they finish, a page that already has
+words is never read twice, and closing the tab costs at most the page in flight.
+Pages with no text layer are still exported as images, so a part-finished run is
+worth having.
+
+Accuracy comes from the pixels, so it is only as good as the capture. Kindle paints
+roughly 150–200 dpi, below where the recogniser does its best work, so a page under
+1800 px wide is upscaled before it is read; on clean printed prose the **Balanced**
+JPEG quality is enough, and **High** is the thing to change first if a book comes
+out badly. The engine is `eng` only; it is bundled rather than fetched, which is
+both an MV3 requirement and what keeps the extension offline.
+
+`test/ocr-fixture.html` (`npm run fixture`) runs the vendored engine over a page of
+known text and reports what came back, which is the quickest way to tell a bad
+vendor copy from a bad capture.

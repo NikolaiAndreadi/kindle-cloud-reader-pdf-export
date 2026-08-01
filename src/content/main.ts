@@ -1,4 +1,4 @@
-import { clearBook, countDuplicates, loadMeta } from '../shared/storage.ts';
+import { clearBook, countDuplicates, loadMeta, recognisedIndexes } from '../shared/storage.ts';
 import { saveCachedPdf } from '../pdf/export.ts';
 import { bookId, pageCandidates, readerPosition } from './dom.ts';
 import { notify, removeNoticeLater } from './notice.ts';
@@ -12,6 +12,8 @@ async function bookState(book: string): Promise<BookState> {
   // A "Location 4879 of 4879" book has no page count, and reporting locations
   // as pages would be nonsense, so a total is only offered for page counters.
   const kind = meta.kind ?? position?.kind ?? null;
+  // Keys only, so this stays a cheap thing to ask once a second.
+  const recognised = await recognisedIndexes(book, meta.captures);
 
   return {
     bookId: meta.bookId,
@@ -22,6 +24,7 @@ async function bookState(book: string): Promise<BookState> {
     kind,
     position,
     duplicates: countDuplicates(meta.captures),
+    recognised: recognised.size,
     split: meta.split,
     quality: meta.quality
   };
@@ -73,7 +76,7 @@ chrome.runtime.onMessage.addListener((
       return true;
 
     case 'saveCached':
-      saveCachedPdf(book).then(sendResponse, (error: Error) => sendResponse({ error: `Save failed: ${error.message}` }));
+      saveCachedPdf(book, request.paper).then(sendResponse, (error: Error) => sendResponse({ error: `Save failed: ${error.message}` }));
       return true;
 
     case 'clearCached':

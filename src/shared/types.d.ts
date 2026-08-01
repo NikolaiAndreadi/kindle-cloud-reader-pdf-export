@@ -59,6 +59,21 @@ interface StoredPage {
 }
 
 /**
+ * The OCR result for one stored page, persisted beside it rather than inside it:
+ * a page record is read back for the preview grid, where the words would be dead
+ * weight, and OCR is added long after the page was captured.
+ */
+interface StoredOcr {
+  index: number;
+  /** Size of the page the boxes were measured on, so a mismatch is detectable. */
+  width: number;
+  height: number;
+  words: OcrWord[];
+  /** Mean word confidence, 0–100. Kept for display, not used when exporting. */
+  confidence: number;
+}
+
+/**
  * A freshly encoded page, before it is persisted. It carries no identity: the
  * signature of the source pixels is computed before encoding, and hashing the
  * JPEG is only a fallback for a tainted canvas.
@@ -98,9 +113,62 @@ interface PdfImage {
   bytes: Uint8Array;
 }
 
+/** Sheet the pages are written on. 'native' keeps the capture's own aspect. */
+type PaperName = 'a4' | 'letter' | 'native';
+
+/** Where a captured bitmap sits on a PDF page, all in points. */
+interface PageLayout {
+  pageWidth: number;
+  pageHeight: number;
+  /** Bottom-left corner of the drawn image, in page space. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * One OCR word, in the pixel space of the stored page: x to the right, y down
+ * from the top-left corner. Short keys because a book's worth of these is held
+ * in chrome.storage and read back on every export.
+ */
+interface OcrWord {
+  t: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  /**
+   * Baseline and em size taken from the line this word is on, when the
+   * recogniser reported a usable line box. Both optional: without them the word
+   * box alone has to do, which puts the glyphs a descender too low and sizes a
+   * word of lowercase letters by its x-height.
+   */
+  b?: number;
+  s?: number;
+}
+
+/** How to map OCR pixel coordinates onto a PDF page. */
+interface TextPlacement {
+  /** Points per source pixel. */
+  scale: number;
+  /** Page-space x of the image's left edge. */
+  left: number;
+  /** Page-space y of the image's bottom edge. */
+  bottom: number;
+  /** Height of the source bitmap in pixels, since OCR y counts from the top. */
+  imageHeight: number;
+}
+
+interface PdfOptions {
+  paper?: PaperName;
+}
+
 interface PdfBuilder {
   readonly pages: number;
-  addImage(image: PdfImage): void;
+  /** Pages that ended up carrying a text layer. */
+  readonly textPages: number;
+  addImage(image: PdfImage, words?: OcrWord[]): void;
   /** Coalesce buffered output into a Blob so it can leave the JS heap. */
   flush(): void;
   finish(): Blob;
@@ -121,6 +189,12 @@ interface ScanOptions {
    * per book page without having to change the reader's layout.
    */
   split?: boolean;
+  /**
+   * Sheet the PDF is written on. Unlike quality and split this is not pinned by
+   * the first scan: it is applied when the export runs, so the same cache can be
+   * saved as A4 today and Letter tomorrow.
+   */
+  paper?: PaperName;
 }
 
 /** What the popup shows about the reader and the cache for one book. */
@@ -137,6 +211,8 @@ interface BookState {
   position: ReaderPosition | null;
   /** Captures whose image bytes are identical to another capture. */
   duplicates: number;
+  /** Captures that already have an OCR text layer stored. */
+  recognised: number;
   /**
    * What the cache has already committed to for the whole book. Null until the
    * first scan pins it, or for a cache written before it was recorded. The
@@ -151,7 +227,7 @@ type ReaderRequest =
   | { action: 'retune'; options?: ScanOptions }
   | { action: 'stopScan' }
   | { action: 'getState' }
-  | { action: 'saveCached' }
+  | { action: 'saveCached'; paper?: PaperName }
   | { action: 'clearCached' };
 
 type ReaderAction = ReaderRequest['action'];

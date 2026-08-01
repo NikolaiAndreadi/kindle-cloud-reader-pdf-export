@@ -19,6 +19,18 @@
         background: color-mix(in srgb, #b3261e 12%, Canvas); color: #b3261e;
       }
       .lock[hidden] { display: none; }
+      .ocr { flex-basis: 100%; display: flex; gap: 10px; align-items: center; font-size: 13px; }
+      .ocr button {
+        font: inherit; padding: 4px 10px; border-radius: 4px; cursor: pointer;
+        color: inherit; background: Canvas;
+        border: 1px solid color-mix(in srgb, CanvasText 35%, transparent);
+      }
+      .ocr button:disabled { opacity: .45; cursor: default; }
+      .ocr button[hidden] { display: none; }
+      #ocrStatus { opacity: .8; }
+      /* Marks the pages that already carry a text layer, so a part-finished run
+         is visible on the grid rather than only in the counter. */
+      figcaption .text { flex: none; opacity: .75; }
       main { padding: 20px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
       figure { margin: 0; cursor: grab; }
       figure.dragging { opacity: .4; cursor: grabbing; }
@@ -56,12 +68,21 @@
       <h1 id="title">Captured pages</h1>
       <span class="meta" id="summary">Loading…</span>
       <span class="lock" id="lock" hidden></span>
+      <div class="ocr">
+        <button id="ocrStart" type="button">Add searchable text (OCR)</button>
+        <button id="ocrStop" type="button" hidden>Stop</button>
+        <span id="ocrStatus"></span>
+      </div>
     </header>
     <main id="grid"></main>
     <dialog id="viewer">
       <img id="viewer-image" alt="">
       <form method="dialog"><button>Close</button></form>
     </dialog>
+    <!-- Before preview.js and not part of the bundle: it publishes the global
+         the OCR module reaches for, and vendored code is easier to trust when it
+         is still recognisably the file that was vendored. -->
+    <script src="vendor/tesseract/tesseract.min.js"></script>
     <script src="preview.js"></script>
   </body>
 </html>

@@ -43,6 +43,16 @@
           </label>
         </div>
         <p id="bookNote" class="hint">Set once per book: the first scan fixes both for every page it captures.</p>
+        <!-- Outside #bookOptions on purpose: paper size is decided when the PDF
+             is written, so it stays editable however many pages are cached. -->
+        <label>
+          PDF page size
+          <select id="paper">
+            <option value="a4" selected>A4</option>
+            <option value="letter">US Letter</option>
+            <option value="native">Match capture</option>
+          </select>
+        </label>
         <div class="actions">
           <button id="start">Scan / resume</button>
           <button id="stop" class="secondary">Stop</button>

@@ -1,11 +1,22 @@
-// A minimal PDF/1.4 container holding one JPEG per page. Nothing here knows
-// about Kindle, storage or the DOM — it takes images and returns a Blob.
+// A minimal PDF/1.4 container holding one JPEG per page, optionally with an
+// invisible OCR text layer over it. Nothing here knows about Kindle, storage or
+// the DOM — it takes images and returns a Blob.
 
-const POINTS_WIDE = 612; // US Letter width; every page is scaled to it.
+import { DEFAULT_PAPER, layoutFor } from './paper.ts';
+import { textLayerOps } from './text.ts';
+
+/** Object ids 1–3 are fixed; pages are numbered after them, three ids each. */
+const CATALOG_ID = 1;
+const PAGES_ID = 2;
+const FONT_ID = 3;
+const FIRST_PAGE_ID = 4;
+const IDS_PER_PAGE = 3;
 
 // One encoder for the whole document. Allocating one per write was thousands of
 // throwaway objects per export.
 const encoder = new TextEncoder();
+
+const pt = (value: number): string => value.toFixed(2);
 
 export function bytesFromDataUrl(dataUrl: string): Uint8Array | null {
   const comma = dataUrl.indexOf(',');
@@ -21,15 +32,17 @@ export function bytesFromDataUrl(dataUrl: string): Uint8Array | null {
 /**
  * Incremental writer: pages are appended as they are read from storage and
  * coalesced into Blobs, so a whole book never sits on the JS heap at once. The
- * Catalog and Pages objects are written last (the xref maps ids to offsets, so
- * file order is free) which is what makes streaming possible.
+ * Catalog, Pages and font objects are written last (the xref maps ids to
+ * offsets, so file order is free) which is what makes streaming possible.
  */
-export function pdfBuilder(): PdfBuilder {
+export function pdfBuilder(options: PdfOptions = {}): PdfBuilder {
+  const paper = options.paper ?? DEFAULT_PAPER;
   const parts: BlobPart[] = [];
   const offsets: number[] = [];
   const pageIds: number[] = [];
   let pending: BlobPart[] = [];
   let length = 0;
+  let withText = 0;
 
   const push = (value: string | Uint8Array): void => {
     const bytes = typeof value === 'string' ? encoder.encode(value) : value;
@@ -56,31 +69,56 @@ export function pdfBuilder(): PdfBuilder {
     get pages(): number {
       return pageIds.length;
     },
+    get textPages(): number {
+      return withText;
+    },
     flush,
-    addImage(image: PdfImage): void {
-      if (!image.width || !image.height) return;
+    addImage(image: PdfImage, words?: OcrWord[]): void {
+      const layout = layoutFor(image.width, image.height, paper);
+      if (!layout) return;
+
       const index = pageIds.length;
-      const pageId = 3 + index * 3;
+      const pageId = FIRST_PAGE_ID + index * IDS_PER_PAGE;
       const imageId = pageId + 1;
       const contentId = pageId + 2;
       pageIds.push(pageId);
-      const pointsHigh = (POINTS_WIDE * image.height / image.width).toFixed(2);
-      object(pageId, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${POINTS_WIDE} ${pointsHigh}] /Resources << /XObject << /Im${index} ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>`);
+
+      object(pageId, `<< /Type /Page /Parent ${PAGES_ID} 0 R /MediaBox [0 0 ${pt(layout.pageWidth)} ${pt(layout.pageHeight)}] /Resources << /XObject << /Im${index} ${imageId} 0 R >> /Font << /F1 ${FONT_ID} 0 R >> >> /Contents ${contentId} 0 R >>`);
+
       offsets[imageId] = length;
       push(`${imageId} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.bytes.length} >>\nstream\n`);
       push(image.bytes);
       push('\nendstream\nendobj\n');
-      const command = `q\n${POINTS_WIDE} 0 0 ${pointsHigh} 0 0 cm\n/Im${index} Do\nQ\n`;
+
+      // The image is drawn first so the text lands on top of it. Invisible text
+      // does not paint, but readers pick the topmost object when a click has to
+      // choose between selecting text and grabbing the image.
+      let command = `q\n${pt(layout.width)} 0 0 ${pt(layout.height)} ${pt(layout.x)} ${pt(layout.y)} cm\n/Im${index} Do\nQ\n`;
+      const text = words?.length
+        ? textLayerOps(words, {
+          scale: layout.width / image.width,
+          left: layout.x,
+          bottom: layout.y,
+          imageHeight: image.height
+        })
+        : '';
+      if (text) {
+        command += text;
+        withText += 1;
+      }
       object(contentId, `<< /Length ${command.length} >>\nstream\n${command}endstream`);
     },
     finish(): Blob {
-      object(1, '<< /Type /Catalog /Pages 2 0 R >>');
-      object(2, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] >>`);
+      object(CATALOG_ID, `<< /Type /Catalog /Pages ${PAGES_ID} 0 R >>`);
+      object(PAGES_ID, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] >>`);
+      // Written whether or not any page carries text: one 80-byte object is
+      // cheaper than deciding, since every page's Resources already names it.
+      object(FONT_ID, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
       const xref = length;
-      const count = 3 + pageIds.length * 3;
+      const count = FIRST_PAGE_ID + pageIds.length * IDS_PER_PAGE;
       push(`xref\n0 ${count}\n0000000000 65535 f \n`);
       for (let id = 1; id < count; id++) push(`${String(offsets[id] ?? 0).padStart(10, '0')} 00000 n \n`);
-      push(`trailer\n<< /Size ${count} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
+      push(`trailer\n<< /Size ${count} /Root ${CATALOG_ID} 0 R >>\nstartxref\n${xref}\n%%EOF`);
       flush();
       return new Blob(parts, { type: 'application/pdf' });
     }

@@ -5,6 +5,8 @@
   var META_FLUSH_EVERY = 10;
   var metaKey = (book) => `book:${book}:meta`;
   var pageKey = (book, index) => `book:${book}:page:${String(index).padStart(6, "0")}`;
+  var ocrKey = (book, index, fingerprint) => `book:${book}:ocr:${String(index).padStart(6, "0")}:${fingerprint}`;
+  var ocrKeyFor = (book, capture) => ocrKey(book, capture.index, capture.fingerprint);
   var emptyMeta = (book) => ({
     version: 2,
     bookId: book,
@@ -51,12 +53,51 @@
       }));
     }
   }
+  async function loadOcrBatch(book, captures) {
+    const stored = await chrome.storage.local.get(captures.map((c) => ocrKeyFor(book, c)));
+    const found = /* @__PURE__ */ new Map();
+    for (const capture of captures) {
+      const record = stored[ocrKeyFor(book, capture)];
+      if (Array.isArray(record?.words)) found.set(capture.index, record);
+    }
+    return found;
+  }
+  function ocrKeyParts(book, key) {
+    const prefix = `book:${book}:ocr:`;
+    if (!key.startsWith(prefix)) return null;
+    const rest = key.slice(prefix.length);
+    const split = rest.indexOf(":");
+    if (split < 0) return null;
+    const index = Number(rest.slice(0, split));
+    if (!Number.isInteger(index) || index <= 0) return null;
+    return { index, fingerprint: rest.slice(split + 1) };
+  }
+  async function recognisedIndexes(book, captures, size = READ_BATCH) {
+    const wanted = new Set(captures.map((capture) => `${capture.index}:${capture.fingerprint}`));
+    const found = /* @__PURE__ */ new Set();
+    const local = chrome.storage.local;
+    if (typeof local.getKeys === "function") {
+      for (const key of await local.getKeys()) {
+        const parts = ocrKeyParts(book, key);
+        if (parts && wanted.has(`${parts.index}:${parts.fingerprint}`)) found.add(parts.index);
+      }
+      return found;
+    }
+    for (let start = 0; start < captures.length; start += size) {
+      for (const index of (await loadOcrBatch(book, captures.slice(start, start + size))).keys()) {
+        found.add(index);
+      }
+    }
+    return found;
+  }
   async function clearBook(book) {
     const local = chrome.storage.local;
     const allKeys = typeof local.getKeys === "function" ? await local.getKeys() : Object.keys(await local.get(null));
-    const prefix = `book:${book}:page:`;
-    const pages = allKeys.filter((key) => key.startsWith(prefix));
-    await local.remove([metaKey(book), ...pages]);
+    const pagePrefix = `book:${book}:page:`;
+    const ocrPrefix = `book:${book}:ocr:`;
+    const pages = allKeys.filter((key) => key.startsWith(pagePrefix));
+    const ocr = allKeys.filter((key) => key.startsWith(ocrPrefix));
+    await local.remove([metaKey(book), ...pages, ...ocr]);
     return pages.length;
   }
   function countDuplicates(captures) {
@@ -109,9 +150,240 @@
     }, NOTICE_MS);
   }
 
+  // src/pdf/paper.ts
+  var NATIVE_POINTS_WIDE = 612;
+  var PAPER_SIZES = {
+    a4: { width: 595.28, height: 841.89 },
+    letter: { width: 612, height: 792 }
+  };
+  var DEFAULT_PAPER = "a4";
+  var paperLabel = (paper) => paper === "a4" ? "A4" : paper === "letter" ? "US Letter" : "capture size";
+  function layoutFor(imageWidth, imageHeight, paper) {
+    if (!(imageWidth > 0) || !(imageHeight > 0)) return null;
+    if (paper === "native") {
+      const height2 = NATIVE_POINTS_WIDE * imageHeight / imageWidth;
+      return {
+        pageWidth: NATIVE_POINTS_WIDE,
+        pageHeight: height2,
+        x: 0,
+        y: 0,
+        width: NATIVE_POINTS_WIDE,
+        height: height2
+      };
+    }
+    const size = PAPER_SIZES[paper];
+    const landscape = imageWidth > imageHeight;
+    const pageWidth = landscape ? size.height : size.width;
+    const pageHeight = landscape ? size.width : size.height;
+    const scale = Math.min(pageWidth / imageWidth, pageHeight / imageHeight);
+    const width = imageWidth * scale;
+    const height = imageHeight * scale;
+    return {
+      pageWidth,
+      pageHeight,
+      x: (pageWidth - width) / 2,
+      y: (pageHeight - height) / 2,
+      width,
+      height
+    };
+  }
+
+  // src/pdf/text.ts
+  var INVISIBLE = 3;
+  var MIN_SIDE = 0.5;
+  var MIN_STRETCH = 10;
+  var MAX_STRETCH = 1e3;
+  var WIDTHS = [
+    278,
+    278,
+    355,
+    556,
+    556,
+    889,
+    667,
+    191,
+    333,
+    333,
+    389,
+    584,
+    278,
+    333,
+    278,
+    278,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    278,
+    278,
+    584,
+    584,
+    584,
+    556,
+    1015,
+    667,
+    667,
+    722,
+    722,
+    667,
+    611,
+    778,
+    722,
+    278,
+    500,
+    667,
+    556,
+    833,
+    722,
+    778,
+    667,
+    778,
+    722,
+    667,
+    611,
+    722,
+    667,
+    944,
+    667,
+    667,
+    611,
+    278,
+    278,
+    278,
+    469,
+    556,
+    333,
+    556,
+    556,
+    500,
+    556,
+    556,
+    278,
+    556,
+    556,
+    222,
+    222,
+    500,
+    222,
+    833,
+    556,
+    556,
+    556,
+    556,
+    333,
+    500,
+    278,
+    556,
+    500,
+    722,
+    500,
+    500,
+    500,
+    334,
+    260,
+    334,
+    584
+  ];
+  var FALLBACK_WIDTH = 556;
+  var WIN_ANSI_HIGH = /* @__PURE__ */ new Map([
+    [8364, 128],
+    [8218, 130],
+    [402, 131],
+    [8222, 132],
+    [8230, 133],
+    [8224, 134],
+    [8225, 135],
+    [710, 136],
+    [8240, 137],
+    [352, 138],
+    [8249, 139],
+    [338, 140],
+    [381, 142],
+    [8216, 145],
+    [8217, 146],
+    [8220, 147],
+    [8221, 148],
+    [8226, 149],
+    [8211, 150],
+    [8212, 151],
+    [732, 152],
+    [8482, 153],
+    [353, 154],
+    [8250, 155],
+    [339, 156],
+    [382, 158],
+    [376, 159]
+  ]);
+  function winAnsi(text) {
+    let out = "";
+    for (const character of text) {
+      const code = character.codePointAt(0);
+      if (code >= 32 && code <= 255) out += String.fromCharCode(code);
+      else {
+        const mapped = WIN_ANSI_HIGH.get(code);
+        if (mapped !== void 0) out += String.fromCharCode(mapped);
+      }
+    }
+    return out;
+  }
+  function pdfString(winAnsiText) {
+    let out = "(";
+    for (let i = 0; i < winAnsiText.length; i++) {
+      const code = winAnsiText.charCodeAt(i);
+      if (code === 40 || code === 41 || code === 92) out += `\\${winAnsiText[i]}`;
+      else if (code > 126) out += `\\${code.toString(8).padStart(3, "0")}`;
+      else out += winAnsiText[i];
+    }
+    return `${out})`;
+  }
+  function textWidth(winAnsiText) {
+    let total = 0;
+    for (let i = 0; i < winAnsiText.length; i++) {
+      const code = winAnsiText.charCodeAt(i);
+      total += code >= 32 && code <= 126 ? WIDTHS[code - 32] : FALLBACK_WIDTH;
+    }
+    return total / 1e3;
+  }
+  function textLayerOps(words, place) {
+    const { scale, left, bottom, imageHeight } = place;
+    let out = `BT
+${INVISIBLE} Tr
+`;
+    let used = 0;
+    for (const word of words) {
+      const text = winAnsi(word.t);
+      if (!text.trim()) continue;
+      const boxWidth = (word.x1 - word.x0) * scale;
+      const size = ((word.s ?? word.y1 - word.y0) || 0) * scale;
+      if (boxWidth < MIN_SIDE || size < MIN_SIDE) continue;
+      const natural = textWidth(text) * size;
+      if (natural <= 0) continue;
+      const stretch = Math.min(MAX_STRETCH, Math.max(MIN_STRETCH, 100 * boxWidth / natural));
+      const x = left + word.x0 * scale;
+      const y = bottom + (imageHeight - (word.b ?? word.y1)) * scale;
+      out += `/F1 ${size.toFixed(2)} Tf ${stretch.toFixed(2)} Tz `;
+      out += `1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm ${pdfString(text)} Tj
+`;
+      used += 1;
+    }
+    return used ? `${out}ET
+` : "";
+  }
+
   // src/pdf/builder.ts
-  var POINTS_WIDE = 612;
+  var CATALOG_ID = 1;
+  var PAGES_ID = 2;
+  var FONT_ID = 3;
+  var FIRST_PAGE_ID = 4;
+  var IDS_PER_PAGE = 3;
   var encoder = new TextEncoder();
+  var pt = (value) => value.toFixed(2);
   function bytesFromDataUrl(dataUrl) {
     const comma = dataUrl.indexOf(",");
     if (comma < 0) return null;
@@ -120,12 +392,14 @@
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return bytes;
   }
-  function pdfBuilder() {
+  function pdfBuilder(options = {}) {
+    const paper = options.paper ?? DEFAULT_PAPER;
     const parts = [];
     const offsets = [];
     const pageIds = [];
     let pending = [];
     let length = 0;
+    let withText = 0;
     const push = (value) => {
       const bytes = typeof value === "string" ? encoder.encode(value) : value;
       pending.push(bytes);
@@ -149,16 +423,19 @@
       get pages() {
         return pageIds.length;
       },
+      get textPages() {
+        return withText;
+      },
       flush,
-      addImage(image) {
-        if (!image.width || !image.height) return;
+      addImage(image, words) {
+        const layout = layoutFor(image.width, image.height, paper);
+        if (!layout) return;
         const index = pageIds.length;
-        const pageId = 3 + index * 3;
+        const pageId = FIRST_PAGE_ID + index * IDS_PER_PAGE;
         const imageId = pageId + 1;
         const contentId = pageId + 2;
         pageIds.push(pageId);
-        const pointsHigh = (POINTS_WIDE * image.height / image.width).toFixed(2);
-        object(pageId, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${POINTS_WIDE} ${pointsHigh}] /Resources << /XObject << /Im${index} ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>`);
+        object(pageId, `<< /Type /Page /Parent ${PAGES_ID} 0 R /MediaBox [0 0 ${pt(layout.pageWidth)} ${pt(layout.pageHeight)}] /Resources << /XObject << /Im${index} ${imageId} 0 R >> /Font << /F1 ${FONT_ID} 0 R >> >> /Contents ${contentId} 0 R >>`);
         offsets[imageId] = length;
         push(`${imageId} 0 obj
 << /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.bytes.length} >>
@@ -166,20 +443,31 @@ stream
 `);
         push(image.bytes);
         push("\nendstream\nendobj\n");
-        const command = `q
-${POINTS_WIDE} 0 0 ${pointsHigh} 0 0 cm
+        let command = `q
+${pt(layout.width)} 0 0 ${pt(layout.height)} ${pt(layout.x)} ${pt(layout.y)} cm
 /Im${index} Do
 Q
 `;
+        const text = words?.length ? textLayerOps(words, {
+          scale: layout.width / image.width,
+          left: layout.x,
+          bottom: layout.y,
+          imageHeight: image.height
+        }) : "";
+        if (text) {
+          command += text;
+          withText += 1;
+        }
         object(contentId, `<< /Length ${command.length} >>
 stream
 ${command}endstream`);
       },
       finish() {
-        object(1, "<< /Type /Catalog /Pages 2 0 R >>");
-        object(2, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);
+        object(CATALOG_ID, `<< /Type /Catalog /Pages ${PAGES_ID} 0 R >>`);
+        object(PAGES_ID, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);
+        object(FONT_ID, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
         const xref = length;
-        const count = 3 + pageIds.length * 3;
+        const count = FIRST_PAGE_ID + pageIds.length * IDS_PER_PAGE;
         push(`xref
 0 ${count}
 0000000000 65535 f 
@@ -187,7 +475,7 @@ ${command}endstream`);
         for (let id = 1; id < count; id++) push(`${String(offsets[id] ?? 0).padStart(10, "0")} 00000 n 
 `);
         push(`trailer
-<< /Size ${count} /Root 1 0 R >>
+<< /Size ${count} /Root ${CATALOG_ID} 0 R >>
 startxref
 ${xref}
 %%EOF`);
@@ -208,20 +496,26 @@ ${xref}
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
   }
-  async function saveCachedPdf(book) {
+  async function saveCachedPdf(book, paper = DEFAULT_PAPER) {
     const meta = await loadMeta(book);
     if (!meta.captures.length) return { message: "No saved pages for this book." };
     notify(`Loading ${plural(meta.captures.length, "cached page")}…`);
-    const builder = pdfBuilder();
+    const builder = pdfBuilder({ paper });
     let unreadable = 0;
     for await (const batch of pagesInBatches(book, meta.captures)) {
-      for (const { page } of batch) {
+      const ocr = await loadOcrBatch(book, batch.map(({ capture }) => capture));
+      for (const { capture, page } of batch) {
         const bytes = page?.dataUrl ? bytesFromDataUrl(page.dataUrl) : null;
         if (!bytes || !page?.width || !page.height) {
           unreadable += 1;
           continue;
         }
-        builder.addImage({ width: page.width, height: page.height, bytes });
+        const words = ocr.get(capture.index);
+        const usable = words && words.width === page.width && words.height === page.height;
+        builder.addImage(
+          { width: page.width, height: page.height, bytes },
+          usable ? words.words : void 0
+        );
       }
       builder.flush();
       notify(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);
@@ -234,8 +528,10 @@ ${xref}
     }
     const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     download(builder.finish(), `kindle-${book}-${date}.pdf`);
-    const note = unreadable ? ` ${plural(unreadable, "page")} could not be read.` : "";
-    const message = `Saved ${builder.pages} pages as PDF.${note}`;
+    const notes = [`${paperLabel(paper)} pages`];
+    if (builder.textPages) notes.push(`${builder.textPages} with searchable text`);
+    if (unreadable) notes.push(`${plural(unreadable, "page")} could not be read`);
+    const message = `Saved ${builder.pages} pages as PDF · ${notes.join(" · ")}.`;
     notify(message);
     removeNoticeLater();
     return { message };
@@ -767,6 +1063,7 @@ ${xref}
     const position = readerPosition();
     const candidates = pageCandidates();
     const kind = meta.kind ?? position?.kind ?? null;
+    const recognised = await recognisedIndexes(book, meta.captures);
     return {
       bookId: meta.bookId,
       bookOpen: candidates.length > 0,
@@ -776,6 +1073,7 @@ ${xref}
       kind,
       position,
       duplicates: countDuplicates(meta.captures),
+      recognised: recognised.size,
       split: meta.split,
       quality: meta.quality
     };
@@ -815,7 +1113,7 @@ ${xref}
         bookState(book).then(sendResponse, (error) => sendResponse({ error: error.message }));
         return true;
       case "saveCached":
-        saveCachedPdf(book).then(sendResponse, (error) => sendResponse({ error: `Save failed: ${error.message}` }));
+        saveCachedPdf(book, request.paper).then(sendResponse, (error) => sendResponse({ error: `Save failed: ${error.message}` }));
         return true;
       case "clearCached":
         clearCached(book).then(sendResponse, (error) => sendResponse({ error: `Clear failed: ${error.message}` }));

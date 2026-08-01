@@ -1,6 +1,7 @@
+import { runOcr } from '../ocr/run.ts';
 import { scanRunning } from '../shared/scanning.ts';
 import {
-  deleteCapture, fingerprintCounts, loadMeta, pagesInBatches, reorderCaptures
+  deleteCapture, fingerprintCounts, loadMeta, pagesInBatches, recognisedIndexes, reorderCaptures
 } from '../shared/storage.ts';
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -11,6 +12,9 @@ const title = el('title');
 const lock = el('lock');
 const viewer = el<HTMLDialogElement>('viewer');
 const viewerImage = el<HTMLImageElement>('viewer-image');
+const ocrStart = el<HTMLButtonElement>('ocrStart');
+const ocrStop = el<HTMLButtonElement>('ocrStop');
+const ocrStatus = el('ocrStatus');
 
 const book = new URLSearchParams(location.search).get('book') || '';
 
@@ -39,11 +43,16 @@ interface Tile {
   label: HTMLSpanElement;
   /** Caption text without the duplicate marker. */
   text: string;
+  /** Says "text" once this page has an OCR layer stored. */
+  mark: HTMLSpanElement;
   remove: HTMLButtonElement;
   fingerprint: string;
 }
 
 const tiles = new Map<number, Tile>();
+
+/** Capture indexes with an OCR text layer, as this page last saw storage. */
+let recognised = new Set<number>();
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -66,6 +75,9 @@ viewer.addEventListener('click', () => viewer.close());
 
 function message(text: string): void {
   tiles.clear();
+  captures = [];
+  recognised = new Set();
+  describeOcr();
   summary.textContent = text;
   grid.replaceChildren(Object.assign(document.createElement('p'), {
     className: 'empty', textContent: text
@@ -91,12 +103,14 @@ function refresh(): void {
   let duplicates = 0;
   for (const count of counts.values()) duplicates += count - 1;
 
-  for (const tile of tiles.values()) {
+  for (const [index, tile] of tiles) {
     const repeated = (counts.get(tile.fingerprint) || 0) > 1;
     tile.figure.classList.toggle('dupe', repeated);
     tile.label.textContent = tile.text + (repeated ? ' · repeat' : '');
+    tile.mark.textContent = recognised.has(index) ? 'text' : '';
   }
   describeCache(duplicates);
+  describeOcr();
 }
 
 let armed: HTMLButtonElement | null = null;
@@ -216,10 +230,11 @@ function tile(capture: CaptureRecord, page: StoredPage | undefined): HTMLElement
     caption.append(label);
   }
 
+  const mark = span(recognised.has(capture.index) ? 'text' : '', 'text');
   const remove = deleteButton(capture.index, figure);
-  caption.append(remove);
+  caption.append(mark, remove);
   figure.append(caption);
-  tiles.set(capture.index, { figure, label, text, remove, fingerprint: capture.fingerprint });
+  tiles.set(capture.index, { figure, label, text, mark, remove, fingerprint: capture.fingerprint });
   return figure;
 }
 
@@ -286,6 +301,95 @@ grid.addEventListener('dragend', () => {
 });
 
 /**
+ * OCR runs here rather than in the reader tab or the popup: it needs the wasm
+ * engine, which an extension page can load and a content script cannot, and it
+ * needs somewhere that stays open for the twenty minutes a book takes — which a
+ * popup does not. The pages are already on screen here, so the run has somewhere
+ * to show its progress.
+ */
+let ocrRunning = false;
+let ocrStopRequested = false;
+
+/** Says how much of the book is recognised when nothing is running. */
+function describeOcr(): void {
+  if (ocrRunning) return;
+  const total = captures.length;
+  if (!total) {
+    ocrStatus.textContent = '';
+    ocrStart.disabled = true;
+    return;
+  }
+  const done = captures.filter((capture) => recognised.has(capture.index)).length;
+  ocrStart.disabled = done === total;
+  ocrStatus.textContent = done === total
+    ? `All ${plural(total, 'page')} carry searchable text.`
+    : `${done} of ${total} pages have a text layer · the PDF gets one wherever it exists.`;
+}
+
+async function refreshRecognised(): Promise<void> {
+  recognised = await recognisedIndexes(book, captures);
+  refresh();
+}
+
+/** Mark one page as done without re-reading the whole set from storage. */
+function markRecognised(index: number): void {
+  recognised.add(index);
+  const tile = tiles.get(index);
+  if (tile) tile.mark.textContent = 'text';
+}
+
+async function startOcr(): Promise<void> {
+  if (ocrRunning) return;
+  ocrRunning = true;
+  ocrStopRequested = false;
+  ocrStart.hidden = true;
+  ocrStop.hidden = false;
+  ocrStop.disabled = false;
+  ocrStatus.textContent = 'Starting…';
+
+  let outcome = '';
+  try {
+    const result = await runOcr(book, {
+      onProgress: (progress) => {
+        if (progress.index !== undefined) markRecognised(progress.index);
+        ocrStatus.textContent = progress.status
+          ? `${progress.status}…`
+          : `Reading page ${progress.done} of ${progress.total}${
+            ocrStopRequested ? ' · stopping after this page' : ''}`;
+      },
+      shouldStop: () => ocrStopRequested
+    });
+    const skipped = result.skipped ? `, ${plural(result.skipped, 'page')} skipped` : '';
+    outcome = result.stopped
+      ? `Stopped after ${plural(result.recognised, 'page')}${skipped}. Start again to carry on.`
+      : `Finished — ${plural(result.recognised, 'page')} recognised${skipped}.`;
+  } catch (error) {
+    outcome = `OCR failed: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    ocrRunning = false;
+    ocrStart.hidden = false;
+    ocrStop.hidden = true;
+    await refreshRecognised();
+    // After the refresh, not before: refresh() rewrites this line from the
+    // counts, which would erase the one thing worth reading here.
+    if (outcome) ocrStatus.textContent = outcome;
+  }
+}
+
+ocrStart.addEventListener('click', () => void startOcr());
+ocrStop.addEventListener('click', () => {
+  ocrStopRequested = true;
+  ocrStop.disabled = true;
+});
+
+// A run outlives nothing: closing the tab kills the worker mid-page, and that
+// page is simply not stored. Warning about it is more use than trying to save it.
+addEventListener('beforeunload', (event) => {
+  if (!ocrRunning) return;
+  event.preventDefault();
+});
+
+/**
  * Which load() call owns the grid. A scan finishing reloads the page contents
  * while the previous load may still be walking its batches; the stale one drops
  * out rather than appending tiles for an index nobody is looking at any more.
@@ -310,6 +414,9 @@ async function load(): Promise<void> {
   captures = meta.captures;
   total = meta.total;
   refresh();
+  // Before the tiles, so each one is built already knowing whether it has text.
+  await refreshRecognised();
+  if (mine !== generation) return;
 
   for await (const batch of pagesInBatches(book, meta.captures)) {
     if (mine !== generation) return;

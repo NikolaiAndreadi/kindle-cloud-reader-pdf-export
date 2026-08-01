@@ -13,6 +13,8 @@ import { READER_HOSTS, matchPattern } from './src/shared/reader-hosts.ts';
 import {
   DELAY_DEFAULT, DELAY_MAX, DELAY_MIN, JITTER_DEFAULT, JITTER_MAX, JITTER_MIN
 } from './src/shared/timing.ts';
+import { PAPER_NAMES } from './src/pdf/paper.ts';
+import { VENDOR_DIR, missingVendorFiles } from './vendor.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const watch = process.argv.includes('--watch');
@@ -53,6 +55,50 @@ async function verifyManifest() {
 
   if (problems.length) {
     throw new Error(`manifest.json is out of sync with src/shared/reader-hosts.ts:\n  ${problems.join('\n  ')}`);
+  }
+
+  // OCR compiles a wasm module, which an extension page may not do under the
+  // default MV3 policy. Without this the preview page loads and the Add
+  // searchable text button fails at the first click.
+  const csp = manifest.content_security_policy?.extension_pages ?? '';
+  if (!csp.includes("'wasm-unsafe-eval'")) {
+    throw new Error("manifest.json needs 'wasm-unsafe-eval' in content_security_policy.extension_pages for OCR");
+  }
+}
+
+/**
+ * The OCR engine is copied out of node_modules by `npm run vendor` and checked
+ * in, so a fresh clone can be loaded unpacked without a build. Missing files
+ * would only show up as a failed OCR run, long after the build that lost them.
+ */
+async function verifyVendored() {
+  const missing = await missingVendorFiles();
+  if (missing.length) {
+    throw new Error(
+      `${VENDOR_DIR} is missing ${missing.join(', ')} — run \`npm run vendor\``
+    );
+  }
+}
+
+/**
+ * popup.html offers the paper sizes by name and the PDF writer implements them
+ * by name, with nothing to connect the two. An option no writer knows falls back
+ * to A4 silently, which looks like the setting being ignored.
+ */
+async function verifyPaperSizes() {
+  const html = await readFile(resolve(root, 'popup.html'), 'utf8');
+  const select = html.match(/<select[^>]*id="paper"[^>]*>([\s\S]*?)<\/select>/)?.[1];
+  if (!select) throw new Error('popup.html has no <select id="paper">');
+  const offered = [...select.matchAll(/value="([^"]*)"/g)].map((match) => match[1]);
+  const unknown = offered.filter((name) => !PAPER_NAMES.includes(name));
+  const absent = PAPER_NAMES.filter((name) => !offered.includes(name));
+  if (unknown.length || absent.length) {
+    throw new Error(
+      `#paper is out of sync with src/pdf/paper.ts: ${[
+        unknown.length ? `unknown ${unknown.join(', ')}` : '',
+        absent.length ? `missing ${absent.join(', ')}` : ''
+      ].filter(Boolean).join('; ')}`
+    );
   }
 }
 
@@ -107,6 +153,8 @@ const options = {
 
 await verifyManifest();
 await verifySliders();
+await verifyPaperSizes();
+await verifyVendored();
 
 const builds = Object.entries(ENTRIES).map(([outfile, entry]) => ({
   ...options,

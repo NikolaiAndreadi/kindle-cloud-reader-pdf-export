@@ -6,6 +6,7 @@
   "description": "Save rendered pages from Kindle Cloud Reader for personal offline use.",
   "scripts": {
     "build": "npm run typecheck && node build.mjs",
+    "vendor": "node vendor.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test/unit",
     "lint": "biome lint",
@@ -16,9 +17,11 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",
+    "@tesseract.js-data/eng": "^1.0.0",
     "@types/chrome": "^0.0.287",
     "@types/node": "^26.1.2",
     "esbuild": "^0.28.1",
+    "tesseract.js": "^7.0.0",
     "typescript": "^5.7.2"
   }
 }

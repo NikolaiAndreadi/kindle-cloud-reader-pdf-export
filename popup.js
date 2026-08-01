@@ -1,5 +1,10 @@
 "use strict";
 (() => {
+  // src/pdf/paper.ts
+  var PAPER_NAMES = ["a4", "letter", "native"];
+  var DEFAULT_PAPER = "a4";
+  var isPaperName = (value) => typeof value === "string" && PAPER_NAMES.includes(value);
+
   // src/shared/reader-hosts.ts
   var READER_HOSTS = [
     "read.amazon.com",
@@ -57,6 +62,7 @@
     jitter: required("#jitter"),
     jitterValue: required("#jitterValue"),
     quality: required("#quality"),
+    paper: required("#paper"),
     split: required("#split"),
     bookOptions: required("#bookOptions"),
     bookNote: required("#bookNote"),
@@ -92,7 +98,8 @@
     if (!state.count) return `No saved pages yet · ${state.bookId}`;
     const dupes = state.duplicates ? ` · ${plural(state.duplicates, "duplicate")}` : "";
     const outOf = state.total ? ` of ~${state.total}` : "";
-    return `${plural(state.count, "saved view")}${outOf}${dupes} · ${state.bookId}`;
+    const text = state.recognised === state.count ? " · all searchable" : state.recognised ? ` · ${state.recognised}/${state.count} searchable` : " · no text layer yet";
+    return `${plural(state.count, "saved view")}${outOf}${dupes}${text} · ${state.bookId}`;
   }
   function lockBookOptions(state) {
     const locked = Boolean(state?.count);
@@ -131,11 +138,13 @@
   var POLL_MS = 1e3;
   var HOLD_MS = 2e3;
   var currentBook = null;
+  var paperChoice = () => isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
   var uiOptions = () => ({
     delay: Number(ui.delay.value),
     jitter: Number(ui.jitter.value),
     quality: Number(ui.quality.value),
-    split: ui.split.checked
+    split: ui.split.checked,
+    paper: paperChoice()
   });
   async function activeTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -240,7 +249,7 @@
   });
   onClick(ui.save, async () => {
     notice("Building PDF in the reader tab…");
-    return (await send("saveCached")).message;
+    return (await send("saveCached", { paper: paperChoice() })).message;
   });
   onClick(ui.stop, async () => {
     await send("stopScan");
@@ -256,7 +265,7 @@
     } catch {
     }
   }
-  for (const control of [ui.quality, ui.split]) {
+  for (const control of [ui.quality, ui.split, ui.paper]) {
     control.addEventListener("change", () => void remember(false));
   }
   for (const slider of [ui.delay, ui.jitter]) {
@@ -270,6 +279,7 @@
       if (options.jitter !== void 0) ui.jitter.value = String(clampJitter(options.jitter));
       if (options.quality && !ui.quality.disabled) ui.quality.value = String(options.quality);
       if (options.split !== void 0 && !ui.split.disabled) ui.split.checked = options.split;
+      if (isPaperName(options.paper)) ui.paper.value = options.paper;
       showTiming();
     }
   });

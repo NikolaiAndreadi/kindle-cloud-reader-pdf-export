@@ -1,3 +1,4 @@
+import { DEFAULT_PAPER, isPaperName } from '../pdf/paper.ts';
 import { READER_HOME, isReaderUrl } from '../shared/reader-hosts.ts';
 import { clampDelay, clampJitter } from '../shared/timing.ts';
 import { ui } from './elements.ts';
@@ -12,11 +13,14 @@ const HOLD_MS = 2000;
 
 let currentBook: string | null = null;
 
+const paperChoice = (): PaperName => isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
+
 const uiOptions = (): ScanOptions => ({
   delay: Number(ui.delay.value),
   jitter: Number(ui.jitter.value),
   quality: Number(ui.quality.value),
-  split: ui.split.checked
+  split: ui.split.checked,
+  paper: paperChoice()
 });
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
@@ -171,7 +175,7 @@ onClick(ui.start, async () => {
 
 onClick(ui.save, async () => {
   notice('Building PDF in the reader tab…');
-  return (await send('saveCached')).message;
+  return (await send('saveCached', { paper: paperChoice() })).message;
 });
 
 onClick(ui.stop, async () => {
@@ -202,7 +206,7 @@ async function remember(pacing: boolean): Promise<void> {
   }
 }
 
-for (const control of [ui.quality, ui.split]) {
+for (const control of [ui.quality, ui.split, ui.paper]) {
   control.addEventListener('change', () => void remember(false));
 }
 
@@ -227,6 +231,8 @@ chrome.storage.local.get('options').then(({ options }: { options?: ScanOptions }
     // arrives second would otherwise win, and the cache is the authority.
     if (options.quality && !ui.quality.disabled) ui.quality.value = String(options.quality);
     if (options.split !== undefined && !ui.split.disabled) ui.split.checked = options.split;
+    // Never pinned by the cache, so unlike the pair above it is simply restored.
+    if (isPaperName(options.paper)) ui.paper.value = options.paper;
     showTiming();
   }
 });
