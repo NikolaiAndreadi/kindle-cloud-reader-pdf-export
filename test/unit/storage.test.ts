@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
 import {
-  clearBook, countDuplicates, emptyMeta, fingerprintCounts, loadMeta, metaKey,
-  nextIndex, pageKey, pagesInBatches, saveMeta, storePage
+  clearBook, countDuplicates, deleteCapture, emptyMeta, fingerprintCounts, loadMeta, metaKey,
+  nextIndex, pageKey, pagesInBatches, reorderCaptures, saveMeta, storePage
 } from '../../src/shared/storage.ts';
 
 /** Just enough of chrome.storage.local to exercise the module. */
@@ -161,6 +161,71 @@ describe('pagesInBatches', () => {
     let batches = 0;
     for await (const _ of pagesInBatches('B001', [])) batches += 1;
     assert.equal(batches, 0);
+  });
+});
+
+/** A book with `count` stored pages, indexed and flushed. */
+async function seed(book: string, count: number): Promise<BookMeta> {
+  const meta = { ...emptyMeta(book), total: 40 };
+  for (let i = 1; i <= count; i++) await storePage(meta, capture(i), image());
+  await saveMeta(meta);
+  return meta;
+}
+
+const order = (meta: BookMeta): number[] => meta.captures.map((c) => c.index);
+
+describe('reorderCaptures', () => {
+  it('rewrites export order without touching the storage keys', async () => {
+    await seed('B001', 3);
+    const meta = await reorderCaptures('B001', [3, 1, 2]);
+
+    assert.deepEqual(order(meta), [3, 1, 2]);
+    assert.deepEqual(order(await loadMeta('B001')), [3, 1, 2]);
+    for (const i of [1, 2, 3]) assert.ok(data.has(pageKey('B001', i)));
+  });
+
+  it('keeps the rest of the index intact', async () => {
+    await seed('B001', 2);
+    const meta = await reorderCaptures('B001', [2, 1]);
+    assert.equal(meta.total, 40);
+    assert.equal(meta.captures[0]!.fingerprint, 'fp-2');
+  });
+
+  it('appends captures the caller never saw, so a scan mid-edit loses nothing', async () => {
+    await seed('B001', 4);
+    // The caller was showing only the first three when it reordered them.
+    const meta = await reorderCaptures('B001', [3, 1, 2]);
+    assert.deepEqual(order(meta), [3, 1, 2, 4]);
+  });
+
+  it('ignores indexes that are no longer cached', async () => {
+    await seed('B001', 2);
+    assert.deepEqual(order(await reorderCaptures('B001', [2, 99, 1])), [2, 1]);
+  });
+});
+
+describe('deleteCapture', () => {
+  it('drops the record and the page it points at', async () => {
+    await seed('B001', 3);
+    const meta = await deleteCapture('B001', 2);
+
+    assert.deepEqual(order(meta), [1, 3]);
+    assert.deepEqual(order(await loadMeta('B001')), [1, 3]);
+    assert.equal(data.has(pageKey('B001', 2)), false);
+    assert.ok(data.has(pageKey('B001', 1)));
+    assert.ok(data.has(pageKey('B001', 3)));
+  });
+
+  it('leaves the index unchanged when the capture is already gone', async () => {
+    await seed('B001', 2);
+    assert.deepEqual(order(await deleteCapture('B001', 9)), [1, 2]);
+  });
+
+  it('lets the freed index be written again rather than reusing a stale page', async () => {
+    await seed('B001', 3);
+    const meta = await deleteCapture('B001', 3);
+    assert.equal(nextIndex(meta), 3);
+    assert.equal(data.has(pageKey('B001', 3)), false);
   });
 });
 

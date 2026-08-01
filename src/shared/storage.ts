@@ -88,6 +88,49 @@ export async function* pagesInBatches(
   }
 }
 
+/**
+ * Rewrite the capture order for a book. `order` lists capture indexes in the
+ * order they should be exported; the index of a record never changes, because
+ * it is the storage key of the page it points at.
+ *
+ * The stored index is re-read rather than taking the caller's copy: a scan
+ * running in another tab may have appended pages since the caller loaded it,
+ * and those keep their place at the end instead of being dropped. Nothing here
+ * can protect an edit made *while* a scan is running — that scan holds the
+ * index in memory and its next flush wins.
+ */
+export async function reorderCaptures(book: string, order: number[]): Promise<BookMeta> {
+  const meta = await loadMeta(book);
+  const remaining = new Map(meta.captures.map((capture) => [capture.index, capture]));
+  const ordered: CaptureRecord[] = [];
+  for (const index of order) {
+    const capture = remaining.get(index);
+    if (!capture) continue;
+    ordered.push(capture);
+    remaining.delete(index);
+  }
+  // A Map iterates in insertion order, so anything the caller did not name is
+  // appended still in capture order.
+  meta.captures = [...ordered, ...remaining.values()];
+  await saveMeta(meta);
+  return meta;
+}
+
+/**
+ * Drop one capture and the page it points at. The index is freed but not
+ * reused: nextIndex only ever moves past the highest one still present, so
+ * deleting the newest capture and scanning again writes to that key afresh.
+ */
+export async function deleteCapture(book: string, index: number): Promise<BookMeta> {
+  const meta = await loadMeta(book);
+  meta.captures = meta.captures.filter((capture) => capture.index !== index);
+  // Index first: a failure after this leaves an unreferenced page, which
+  // clearBook sweeps, rather than an index pointing at nothing.
+  await saveMeta(meta);
+  await chrome.storage.local.remove([pageKey(book, index)]);
+  return meta;
+}
+
 export async function clearBook(book: string): Promise<number> {
   const local = chrome.storage.local;
   // getKeys landed after the extension's minimum Chrome version. get(null) is
