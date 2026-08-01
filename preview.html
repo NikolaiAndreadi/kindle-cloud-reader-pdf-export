@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Captured pages</title>
+    <style>
+      :root { color-scheme: light dark; font: 14px/1.5 system-ui, sans-serif; }
+      body { margin: 0; }
+      header {
+        position: sticky; top: 0; z-index: 2; display: flex; gap: 12px; align-items: baseline;
+        flex-wrap: wrap; padding: 14px 20px; background: Canvas;
+        border-bottom: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+      }
+      h1 { margin: 0; font-size: 16px; }
+      .meta { opacity: .7; font-size: 13px; }
+      .warn { color: #b3261e; font-weight: 600; }
+      main { padding: 20px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+      figure { margin: 0; }
+      figure img {
+        display: block; width: 100%; height: auto; border-radius: 4px; cursor: zoom-in;
+        background: #fff; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+      }
+      figcaption { margin-top: 5px; font-size: 12px; opacity: .8; display: flex; justify-content: space-between; gap: 8px; }
+      .dupe img { outline: 2px solid #b3261e; outline-offset: 1px; }
+      .dupe figcaption { color: #b3261e; }
+      dialog { padding: 0; border: 0; max-width: 96vw; max-height: 96vh; background: transparent; }
+      dialog::backdrop { background: #000c; }
+      dialog img { max-width: 96vw; max-height: 92vh; display: block; }
+      dialog form { text-align: center; margin-top: 8px; }
+      .empty { padding: 40px 20px; opacity: .7; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1 id="title">Captured pages</h1>
+      <span class="meta" id="summary">Loading…</span>
+    </header>
+    <main id="grid"></main>
+    <dialog id="viewer">
+      <img id="viewer-image" alt="">
+      <form method="dialog"><button>Close</button></form>
+    </dialog>
+    <script src="preview.js"></script>
+  </body>
+</html>

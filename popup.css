@@ -1,0 +1,14 @@
+:root { color-scheme: light dark; font: 14px/1.4 system-ui, sans-serif; }
+body { width: 290px; margin: 0; }
+main { padding: 16px; }
+h1 { margin: 0 0 8px; font-size: 18px; }
+label { display: grid; gap: 4px; margin: 12px 0; }
+label.check { display: flex; align-items: center; gap: 7px; margin: 12px 0 6px; }
+label.check input { margin: 0; }
+select, button { font: inherit; padding: 8px; }
+.actions { display: grid; gap: 8px; margin-top: 16px; }
+button { border: 0; border-radius: 6px; background: #ff9900; color: #161616; font-weight: 650; cursor: pointer; }
+button.secondary { background: #7773; color: inherit; }
+button.danger { background: #b3261e; color: #fff; }
+.cache { padding: 8px; border-radius: 6px; background: #7772; }
+.hint { opacity: .7; font-size: 12px; }

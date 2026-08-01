@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cloud Reader Export</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>Cloud Reader Export</h1>
+      <p id="status">Open a book and start scanning.</p>
+      <label>
+        Page delay
+        <select id="delay">
+          <option value="700">Fast (0.7 s)</option>
+          <option value="1100" selected>Normal (1.1 s)</option>
+          <option value="1800">Slow (1.8 s)</option>
+        </select>
+      </label>
+      <label>
+        JPEG quality
+        <select id="quality">
+          <option value="0.75">Smaller</option>
+          <option value="0.88" selected>Balanced</option>
+          <option value="0.96">High</option>
+        </select>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="split" checked>
+        Split two-page spreads
+      </label>
+      <p id="layout" class="hint" hidden></p>
+      <div class="actions">
+        <button id="open" class="secondary">Open read.amazon.com</button>
+        <button id="start">Scan / resume</button>
+        <button id="stop" class="secondary">Stop</button>
+        <button id="save" class="secondary">Save cached pages as PDF</button>
+        <button id="preview" class="secondary" hidden>See captured pages</button>
+        <button id="clear" class="danger">Clear this book</button>
+      </div>
+      <p id="cache" class="cache">Checking saved pages…</p>
+      <p class="hint">Captured pages remain stored for this book. Reopen it later and resume without losing earlier pages.</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
