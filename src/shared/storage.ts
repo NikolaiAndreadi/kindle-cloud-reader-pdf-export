@@ -116,6 +116,19 @@ export async function storePage(
   await chrome.storage.local.set({ [pageKey(meta.bookId, record.index)]: page });
 }
 
+/** One read for these captures' pages, keyed by index. Data URLs and all. */
+export async function loadPageBatch(
+  book: string, captures: CaptureRecord[]
+): Promise<Map<number, StoredPage>> {
+  const stored = await chrome.storage.local.get(captures.map((c) => pageKey(book, c.index)));
+  const found = new Map<number, StoredPage>();
+  for (const capture of captures) {
+    const page = stored[pageKey(book, capture.index)] as StoredPage | undefined;
+    if (page) found.set(capture.index, page);
+  }
+  return found;
+}
+
 // Batched because neither the PDF writer nor the preview grid can afford every
 // data URL of a book in memory at once.
 export async function* pagesInBatches(
@@ -123,11 +136,8 @@ export async function* pagesInBatches(
 ): AsyncGenerator<{ capture: CaptureRecord; page: StoredPage | undefined }[]> {
   for (let start = 0; start < captures.length; start += size) {
     const batch = captures.slice(start, start + size);
-    const stored = await chrome.storage.local.get(batch.map((c) => pageKey(book, c.index)));
-    yield batch.map((capture) => ({
-      capture,
-      page: stored[pageKey(book, capture.index)] as StoredPage | undefined
-    }));
+    const found = await loadPageBatch(book, batch);
+    yield batch.map((capture) => ({ capture, page: found.get(capture.index) }));
   }
 }
 
@@ -150,6 +160,21 @@ export async function loadOcrBatch(
     if (Array.isArray(record?.words)) found.set(capture.index, record);
   }
   return found;
+}
+
+/**
+ * The same batching for a text-only export, which wants the words and nothing
+ * else. Reading through pagesInBatches would pull every data URL of the book
+ * back out for pages that are never drawn — the whole saving of the mode.
+ */
+export async function* ocrInBatches(
+  book: string, captures: CaptureRecord[], size = READ_BATCH
+): AsyncGenerator<{ capture: CaptureRecord; ocr: StoredOcr | undefined }[]> {
+  for (let start = 0; start < captures.length; start += size) {
+    const batch = captures.slice(start, start + size);
+    const found = await loadOcrBatch(book, batch);
+    yield batch.map((capture) => ({ capture, ocr: found.get(capture.index) }));
+  }
 }
 
 export function ocrKeyParts(

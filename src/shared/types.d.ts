@@ -93,14 +93,25 @@ interface RegionView {
   signature: string | null;
 }
 
-interface PdfImage {
+interface PdfPage {
   width: number;
   height: number;
-  bytes: Uint8Array;
+  /**
+   * The captured JPEG. Absent in 'text' mode, where nothing is drawn and the
+   * dimensions are only the coordinate space the OCR boxes were measured in.
+   */
+  bytes?: Uint8Array;
 }
 
 /** 'native' keeps the capture's own aspect instead of a fixed sheet. */
 type PaperName = 'a4' | 'letter' | 'native';
+
+/**
+ * 'scan' is the photograph of the page with an invisible text layer over it.
+ * 'text' drops the photograph and paints the OCR words themselves, in place —
+ * a vector page, a fraction of the size, as accurate as the recogniser was.
+ */
+type PdfMode = 'scan' | 'text';
 
 /** All in points. */
 interface PageLayout {
@@ -147,12 +158,13 @@ interface TextPlacement {
 
 interface PdfOptions {
   paper?: PaperName;
+  mode?: PdfMode;
 }
 
 interface PdfBuilder {
   readonly pages: number;
   readonly textPages: number;
-  addImage(image: PdfImage, words?: OcrWord[]): void;
+  addPage(page: PdfPage, words?: OcrWord[]): void;
   /** Coalesce buffered output into a Blob so it can leave the JS heap. */
   flush(): void;
   finish(): Blob;

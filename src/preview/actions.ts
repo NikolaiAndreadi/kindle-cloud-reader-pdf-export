@@ -24,7 +24,8 @@ export class BookActions {
     this.book = book;
     this.grid = grid;
 
-    ui.save.addEventListener('click', () => void this.save());
+    ui.save.addEventListener('click', () => void this.save('scan'));
+    ui.saveText.addEventListener('click', () => void this.save('text'));
     this.bindHold();
 
     void loadPaper().then((paper) => {
@@ -60,16 +61,24 @@ export class BookActions {
   describe(): void {
     const empty = !this.grid.captures.length;
     ui.save.disabled = empty || this.saving;
+    // The text PDF is made of the OCR and nothing else, so it has nothing to
+    // write until some page has been recognised. Said on the button rather than
+    // after the click, since the run it asks for takes minutes.
+    const recognised = this.grid.recognisedCount();
+    ui.saveText.disabled = empty || this.saving || !recognised;
+    ui.saveText.title = recognised
+      ? `Vector text only, from ${plural(recognised, 'recognised page')} — no page images.`
+      : 'Add searchable text (OCR) first: a text PDF is made of the recognised words.';
     ui.clear.disabled = empty || this.saving || this.ocrBusy || this.grid.locked;
   }
 
-  private async save(): Promise<void> {
+  private async save(mode: PdfMode): Promise<void> {
     if (this.saving) return;
     this.saving = true;
     this.describe();
     try {
       const paper = isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
-      const result = await saveCachedPdf(this.book, paper, (text) => {
+      const result = await saveCachedPdf(this.book, { paper, mode }, (text) => {
         ui.saveStatus.textContent = text;
       });
       ui.saveStatus.textContent = result.message;

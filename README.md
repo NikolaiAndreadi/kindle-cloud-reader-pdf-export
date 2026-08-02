@@ -41,8 +41,8 @@ Licenses and exact upstream versions are listed in
 6. Stop whenever you like; the captured pages remain cached per book.
 7. Choose **See captured pages and save PDF**. Everything that acts on the whole
    book lives on that page: reordering, deleting single pages, **Add searchable
-   text (OCR)**, the **Page size** and **Save PDF** in the top right, and
-   **Clear this book**.
+   text (OCR)**, the **Page size**, **Save PDF** and **Save text PDF** in the top
+   right, and **Clear this book**.
 
 Keep the reader tab visible while it scans. If pages are skipped, choose the slower
 page delay.
@@ -132,3 +132,36 @@ both an MV3 requirement and what keeps the extension offline.
 `test/ocr-fixture.html` (`npm run fixture`) runs the vendored engine over a page of
 known text and reports what came back, which is the quickest way to tell a bad
 vendor copy from a bad capture.
+
+## The two exports
+
+The preview page saves the same cache two ways, and the buttons sit side by side
+because neither replaces the other.
+
+**Save PDF** is the scan: one JPEG per page, with the invisible text layer over
+any page OCR has been over. It is exactly what was captured, whether or not there
+is any OCR at all.
+
+**Save text PDF** drops the bitmaps and paints the recognised words themselves —
+a vector page. Each word is set in Times-Roman at the type size the recogniser
+measured for its line and placed at the position it was found at, so paragraphs,
+indents, headings, margins and page numbers keep their places and their relative
+sizes without anything having to guess at the structure of the page. Nothing is
+reflowed and no font is embedded, which is why the file comes out on the order of
+a hundredth the size and stays sharp at any zoom.
+
+What it costs is everything that was not text: plates, rules, ornaments and drop
+caps are not carried across, and a misread word is a misread word rather than a
+picture of the right one. It is enabled only once some page has been recognised,
+and a page OCR found nothing on is written as a blank sheet so the numbering still
+lines up with the scan. Such a page is measured from its own stored bitmap rather
+than from its neighbours: a capture size belongs to the page, not to the book —
+an unsplit spread stays landscape — and on **Match capture** borrowing the wrong
+one would turn the sheet sideways.
+
+Word boxes only bound the ink, so the width of the box and the width of the same
+word in Times rarely agree. Words are condensed to fit where the serif is too
+wide — boxes never overlap, so a condensed word can never run into its neighbour —
+but they are essentially never expanded to fill a box: a word spread to fill its
+box reads as letterspaced, and against a line of ordinary text letterspaced reads
+as a mistake. The slack falls into the space after the word, where a space belongs.

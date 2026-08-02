@@ -137,14 +137,20 @@
     return emptyMeta(book2);
   }
   var saveMeta = (meta) => chrome.storage.local.set({ [metaKey(meta.bookId)]: meta });
+  async function loadPageBatch(book2, captures) {
+    const stored = await chrome.storage.local.get(captures.map((c) => pageKey(book2, c.index)));
+    const found = /* @__PURE__ */ new Map();
+    for (const capture of captures) {
+      const page = stored[pageKey(book2, capture.index)];
+      if (page) found.set(capture.index, page);
+    }
+    return found;
+  }
   async function* pagesInBatches(book2, captures, size = READ_BATCH) {
     for (let start = 0; start < captures.length; start += size) {
       const batch = captures.slice(start, start + size);
-      const stored = await chrome.storage.local.get(batch.map((c) => pageKey(book2, c.index)));
-      yield batch.map((capture) => ({
-        capture,
-        page: stored[pageKey(book2, capture.index)]
-      }));
+      const found = await loadPageBatch(book2, batch);
+      yield batch.map((capture) => ({ capture, page: found.get(capture.index) }));
     }
   }
   var storeOcr = (book2, capture, result) => chrome.storage.local.set({ [ocrKeyFor(book2, capture)]: result });
@@ -156,6 +162,13 @@
       if (Array.isArray(record?.words)) found.set(capture.index, record);
     }
     return found;
+  }
+  async function* ocrInBatches(book2, captures, size = READ_BATCH) {
+    for (let start = 0; start < captures.length; start += size) {
+      const batch = captures.slice(start, start + size);
+      const found = await loadOcrBatch(book2, batch);
+      yield batch.map((capture) => ({ capture, ocr: found.get(capture.index) }));
+    }
   }
   function ocrKeyParts(book2, key) {
     const prefix = `book:${book2}:ocr:`;
@@ -228,10 +241,12 @@
 
   // src/pdf/text.ts
   var INVISIBLE = 3;
+  var FILL = 0;
   var MIN_SIDE = 0.5;
   var MIN_STRETCH = 10;
   var MAX_STRETCH = 1e3;
-  var WIDTHS = [
+  var MAX_VISIBLE_STRETCH = 105;
+  var HELVETICA_WIDTHS = [
     278,
     278,
     355,
@@ -328,7 +343,119 @@
     334,
     584
   ];
-  var FALLBACK_WIDTH = 556;
+  var TIMES_WIDTHS = [
+    250,
+    333,
+    408,
+    500,
+    500,
+    833,
+    778,
+    180,
+    333,
+    333,
+    500,
+    564,
+    250,
+    333,
+    250,
+    278,
+    500,
+    500,
+    500,
+    500,
+    500,
+    500,
+    500,
+    500,
+    500,
+    500,
+    278,
+    278,
+    564,
+    564,
+    564,
+    444,
+    921,
+    722,
+    667,
+    667,
+    722,
+    611,
+    556,
+    722,
+    722,
+    333,
+    389,
+    722,
+    611,
+    889,
+    722,
+    722,
+    556,
+    722,
+    667,
+    556,
+    611,
+    722,
+    722,
+    944,
+    722,
+    722,
+    611,
+    333,
+    278,
+    333,
+    469,
+    500,
+    333,
+    444,
+    500,
+    444,
+    500,
+    444,
+    333,
+    500,
+    500,
+    278,
+    278,
+    500,
+    278,
+    778,
+    500,
+    500,
+    500,
+    500,
+    333,
+    389,
+    278,
+    500,
+    500,
+    722,
+    500,
+    500,
+    444,
+    480,
+    200,
+    480,
+    541
+  ];
+  var HELVETICA = {
+    baseFont: "Helvetica",
+    widths: HELVETICA_WIDTHS,
+    fallback: 556
+  };
+  var TIMES_ROMAN = {
+    baseFont: "Times-Roman",
+    widths: TIMES_WIDTHS,
+    fallback: 500
+  };
+  var fontFor = (mode) => mode === "text" ? TIMES_ROMAN : HELVETICA;
+  var X_HEIGHT_EMS = 0.45;
+  var ASCENT_EMS = 0.7;
+  var DESCENT_EMS = 0.21;
+  var ASCENDING = /[A-Z0-9bdfhijklt£$(){}[\]/\\|!?"'*#@&%]/;
+  var DESCENDING = /[gjpqyQ,;]/;
   var WIN_ANSI_HIGH = /* @__PURE__ */ new Map([
     [8364, 128],
     [8218, 130],
@@ -380,31 +507,44 @@
     }
     return `${out})`;
   }
-  function textWidth(winAnsiText) {
+  function textWidth(winAnsiText, font = HELVETICA) {
     let total = 0;
     for (let i = 0; i < winAnsiText.length; i++) {
       const code = winAnsiText.charCodeAt(i);
-      total += code >= 32 && code <= 126 ? WIDTHS[code - 32] : FALLBACK_WIDTH;
+      total += code >= 32 && code <= 126 ? font.widths[code - 32] : font.fallback;
     }
     return total / 1e3;
   }
-  function textLayerOps(words, place) {
+  function metricsFor(word, estimate) {
+    if (word.s !== void 0 && word.b !== void 0) return { size: word.s, baseline: word.b };
+    const height = word.y1 - word.y0;
+    if (!estimate) return { size: word.s ?? height, baseline: word.b ?? word.y1 };
+    const above = ASCENDING.test(word.t) ? ASCENT_EMS : X_HEIGHT_EMS;
+    const below = DESCENDING.test(word.t) ? DESCENT_EMS : 0;
+    const size = word.s ?? height / (above + below);
+    return { size, baseline: word.b ?? word.y1 - below * size };
+  }
+  function textLayerOps(words, place, mode = "scan") {
     const { scale, left, bottom, imageHeight } = place;
+    const visible = mode === "text";
+    const font = fontFor(mode);
+    const maxStretch = visible ? MAX_VISIBLE_STRETCH : MAX_STRETCH;
     let out = `BT
-${INVISIBLE} Tr
+${visible ? FILL : INVISIBLE} Tr
 `;
     let used = 0;
     for (const word of words) {
       const text = winAnsi(word.t);
       if (!text.trim()) continue;
       const boxWidth = (word.x1 - word.x0) * scale;
-      const size = ((word.s ?? word.y1 - word.y0) || 0) * scale;
+      const metrics = metricsFor(word, visible);
+      const size = (metrics.size || 0) * scale;
       if (boxWidth < MIN_SIDE || size < MIN_SIDE) continue;
-      const natural = textWidth(text) * size;
+      const natural = textWidth(text, font) * size;
       if (natural <= 0) continue;
-      const stretch = Math.min(MAX_STRETCH, Math.max(MIN_STRETCH, 100 * boxWidth / natural));
+      const stretch = Math.min(maxStretch, Math.max(MIN_STRETCH, 100 * boxWidth / natural));
       const x = left + word.x0 * scale;
-      const y = bottom + (imageHeight - (word.b ?? word.y1)) * scale;
+      const y = bottom + (imageHeight - metrics.baseline) * scale;
       out += `/F1 ${size.toFixed(2)} Tf ${stretch.toFixed(2)} Tz `;
       out += `1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm ${pdfString(text)} Tj
 `;
@@ -420,6 +560,7 @@ ${INVISIBLE} Tr
   var FONT_ID = 3;
   var FIRST_PAGE_ID = 4;
   var IDS_PER_PAGE = 3;
+  var IDS_PER_TEXT_PAGE = 2;
   var encoder = new TextEncoder();
   var pt = (value) => value.toFixed(2);
   function bytesFromDataUrl(dataUrl) {
@@ -432,6 +573,8 @@ ${INVISIBLE} Tr
   }
   function pdfBuilder(options = {}) {
     const paper = options.paper ?? DEFAULT_PAPER;
+    const mode = options.mode ?? "scan";
+    const idsPerPage = mode === "text" ? IDS_PER_TEXT_PAGE : IDS_PER_PAGE;
     const parts = [];
     const offsets = [];
     const pageIds = [];
@@ -465,33 +608,39 @@ ${INVISIBLE} Tr
         return withText;
       },
       flush,
-      addImage(image, words) {
-        const layout = layoutFor(image.width, image.height, paper);
+      addPage(page, words) {
+        const layout = layoutFor(page.width, page.height, paper);
         if (!layout) return;
+        const image = mode === "text" ? void 0 : page.bytes;
+        if (mode !== "text" && !image) return;
         const index = pageIds.length;
-        const pageId = FIRST_PAGE_ID + index * IDS_PER_PAGE;
-        const imageId = pageId + 1;
-        const contentId = pageId + 2;
+        const pageId = FIRST_PAGE_ID + index * idsPerPage;
+        const imageId = image ? pageId + 1 : 0;
+        const contentId = pageId + idsPerPage - 1;
         pageIds.push(pageId);
-        object(pageId, `<< /Type /Page /Parent ${PAGES_ID} 0 R /MediaBox [0 0 ${pt(layout.pageWidth)} ${pt(layout.pageHeight)}] /Resources << /XObject << /Im${index} ${imageId} 0 R >> /Font << /F1 ${FONT_ID} 0 R >> >> /Contents ${contentId} 0 R >>`);
-        offsets[imageId] = length;
-        push(`${imageId} 0 obj
-<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.bytes.length} >>
+        const xobject = image ? `/XObject << /Im${index} ${imageId} 0 R >> ` : "";
+        object(pageId, `<< /Type /Page /Parent ${PAGES_ID} 0 R /MediaBox [0 0 ${pt(layout.pageWidth)} ${pt(layout.pageHeight)}] /Resources << ${xobject}/Font << /F1 ${FONT_ID} 0 R >> >> /Contents ${contentId} 0 R >>`);
+        let command = "";
+        if (image) {
+          offsets[imageId] = length;
+          push(`${imageId} 0 obj
+<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.length} >>
 stream
 `);
-        push(image.bytes);
-        push("\nendstream\nendobj\n");
-        let command = `q
+          push(image);
+          push("\nendstream\nendobj\n");
+          command = `q
 ${pt(layout.width)} 0 0 ${pt(layout.height)} ${pt(layout.x)} ${pt(layout.y)} cm
 /Im${index} Do
 Q
 `;
+        }
         const text = words?.length ? textLayerOps(words, {
-          scale: layout.width / image.width,
+          scale: layout.width / page.width,
           left: layout.x,
           bottom: layout.y,
-          imageHeight: image.height
-        }) : "";
+          imageHeight: page.height
+        }, mode) : "";
         if (text) {
           command += text;
           withText += 1;
@@ -503,9 +652,9 @@ ${command}endstream`);
       finish() {
         object(CATALOG_ID, `<< /Type /Catalog /Pages ${PAGES_ID} 0 R >>`);
         object(PAGES_ID, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);
-        object(FONT_ID, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+        object(FONT_ID, `<< /Type /Font /Subtype /Type1 /BaseFont /${fontFor(mode).baseFont} /Encoding /WinAnsiEncoding >>`);
         const xref = length;
-        const count = FIRST_PAGE_ID + pageIds.length * IDS_PER_PAGE;
+        const count = FIRST_PAGE_ID + pageIds.length * idsPerPage;
         push(`xref
 0 ${count}
 0000000000 65535 f 
@@ -534,11 +683,26 @@ ${xref}
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
   }
-  async function saveCachedPdf(book2, paper, report) {
+  async function saveCachedPdf(book2, options, report) {
     const meta = await loadMeta(book2);
     if (!meta.captures.length) return { message: "No saved pages for this book." };
+    const mode = options.mode;
     report(`Loading ${plural(meta.captures.length, "cached page")}…`);
-    const builder = pdfBuilder({ paper });
+    const builder = pdfBuilder({ paper: options.paper, mode });
+    const written = mode === "text" ? await writeTextPages(book2, meta, builder, report) : await writeScannedPages(book2, meta, builder, report);
+    if (written.blocked) return { message: written.blocked };
+    if (!builder.pages) {
+      return { message: "Saved pages could not be read back from storage." };
+    }
+    const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    download(builder.finish(), `kindle-${book2}${mode === "text" ? "-text" : ""}-${date}.pdf`);
+    const notes = [`${paperLabel(options.paper)} pages`];
+    if (mode === "text") notes.push(`${builder.textPages} with recognised text`);
+    else if (builder.textPages) notes.push(`${builder.textPages} with searchable text`);
+    if (written.unreadable) notes.push(`${plural(written.unreadable, "page")} could not be read`);
+    return { message: `Saved ${builder.pages} pages as PDF · ${notes.join(" · ")}.` };
+  }
+  async function writeScannedPages(book2, meta, builder, report) {
     let unreadable = 0;
     for await (const batch of pagesInBatches(book2, meta.captures)) {
       const ocr2 = await loadOcrBatch(book2, batch.map(({ capture }) => capture));
@@ -550,7 +714,7 @@ ${xref}
         }
         const words = ocr2.get(capture.index);
         const usable = words && words.width === page.width && words.height === page.height;
-        builder.addImage(
+        builder.addPage(
           { width: page.width, height: page.height, bytes },
           usable ? words.words : void 0
         );
@@ -558,15 +722,42 @@ ${xref}
       builder.flush();
       report(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);
     }
-    if (!builder.pages) {
-      return { message: "Saved pages could not be read back from storage." };
+    return { unreadable };
+  }
+  var sizeOf = (record) => record?.width && record.height ? { width: record.width, height: record.height } : void 0;
+  async function writeTextPages(book2, meta, builder, report) {
+    let recognised = 0;
+    let unreadable = 0;
+    let previous;
+    let waiting = 0;
+    for await (const batch of ocrInBatches(book2, meta.captures)) {
+      const blanks = batch.filter(({ ocr: ocr2 }) => !sizeOf(ocr2)).map(({ capture }) => capture);
+      const pages = blanks.length ? await loadPageBatch(book2, blanks) : void 0;
+      for (const { capture, ocr: ocr2 } of batch) {
+        const measured = sizeOf(ocr2) ? ocr2 : void 0;
+        const size = sizeOf(measured) ?? sizeOf(pages?.get(capture.index));
+        if (!size) {
+          unreadable += 1;
+          if (!previous) {
+            waiting += 1;
+            continue;
+          }
+          builder.addPage(previous);
+          continue;
+        }
+        previous = size;
+        for (; waiting > 0; waiting--) builder.addPage(size);
+        builder.addPage(size, measured?.words);
+        if (measured) recognised += 1;
+      }
+      builder.flush();
+      report(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);
     }
-    const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    download(builder.finish(), `kindle-${book2}-${date}.pdf`);
-    const notes = [`${paperLabel(paper)} pages`];
-    if (builder.textPages) notes.push(`${builder.textPages} with searchable text`);
-    if (unreadable) notes.push(`${plural(unreadable, "page")} could not be read`);
-    return { message: `Saved ${builder.pages} pages as PDF · ${notes.join(" · ")}.` };
+    if (!recognised) {
+      return { blocked: 'No recognised text in this book yet — run "Add searchable text (OCR)" first.' };
+    }
+    for (; waiting > 0 && previous; waiting--) builder.addPage(previous);
+    return { unreadable };
   }
 
   // src/preview/elements.ts
@@ -587,6 +778,7 @@ ${xref}
     ocrStatus: required("ocrStatus"),
     paper: required("paper"),
     save: required("save"),
+    saveText: required("saveText"),
     saveStatus: required("saveStatus"),
     clear: required("clear")
   };
@@ -609,7 +801,8 @@ ${xref}
     constructor(book2, grid2) {
       this.book = book2;
       this.grid = grid2;
-      ui.save.addEventListener("click", () => void this.save());
+      ui.save.addEventListener("click", () => void this.save("scan"));
+      ui.saveText.addEventListener("click", () => void this.save("text"));
       this.bindHold();
       void loadPaper().then((paper) => {
         ui.paper.value = paper;
@@ -637,15 +830,18 @@ ${xref}
     describe() {
       const empty = !this.grid.captures.length;
       ui.save.disabled = empty || this.saving;
+      const recognised = this.grid.recognisedCount();
+      ui.saveText.disabled = empty || this.saving || !recognised;
+      ui.saveText.title = recognised ? `Vector text only, from ${plural2(recognised, "recognised page")} — no page images.` : "Add searchable text (OCR) first: a text PDF is made of the recognised words.";
       ui.clear.disabled = empty || this.saving || this.ocrBusy || this.grid.locked;
     }
-    async save() {
+    async save(mode) {
       if (this.saving) return;
       this.saving = true;
       this.describe();
       try {
         const paper = isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
-        const result = await saveCachedPdf(this.book, paper, (text) => {
+        const result = await saveCachedPdf(this.book, { paper, mode }, (text) => {
           ui.saveStatus.textContent = text;
         });
         ui.saveStatus.textContent = result.message;

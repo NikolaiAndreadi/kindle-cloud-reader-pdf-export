@@ -29,7 +29,7 @@ describe('bytesFromDataUrl', () => {
 describe('pdfBuilder', () => {
   it('starts with a PDF header and a binary marker', async () => {
     const builder = pdfBuilder();
-    builder.addImage({ width: 800, height: 1200, bytes: jpeg(16) });
+    builder.addPage({ width: 800, height: 1200, bytes: jpeg(16) });
     const body = await text(builder.finish());
     assert.ok(body.startsWith('%PDF-1.4\n'));
     assert.ok(body.includes('%\xe2\xe3\xcf\xd3'));
@@ -37,35 +37,35 @@ describe('pdfBuilder', () => {
 
   it('ends with the trailer and EOF marker', async () => {
     const builder = pdfBuilder();
-    builder.addImage({ width: 800, height: 1200, bytes: jpeg(16) });
+    builder.addPage({ width: 800, height: 1200, bytes: jpeg(16) });
     assert.ok((await text(builder.finish())).endsWith('%%EOF'));
   });
 
   it('counts the pages it has been given', () => {
     const builder = pdfBuilder();
     assert.equal(builder.pages, 0);
-    builder.addImage({ width: 800, height: 1200, bytes: jpeg(8) });
-    builder.addImage({ width: 800, height: 1200, bytes: jpeg(8) });
+    builder.addPage({ width: 800, height: 1200, bytes: jpeg(8) });
+    builder.addPage({ width: 800, height: 1200, bytes: jpeg(8) });
     assert.equal(builder.pages, 2);
   });
 
   it('ignores an image with no dimensions rather than emitting a broken page', () => {
     const builder = pdfBuilder();
-    builder.addImage({ width: 0, height: 1200, bytes: jpeg(8) });
-    builder.addImage({ width: 800, height: 0, bytes: jpeg(8) });
+    builder.addPage({ width: 0, height: 1200, bytes: jpeg(8) });
+    builder.addPage({ width: 800, height: 0, bytes: jpeg(8) });
     assert.equal(builder.pages, 0);
   });
 
   it('declares /Count and /Kids matching the pages added', async () => {
     const builder = pdfBuilder();
-    for (let i = 0; i < 3; i++) builder.addImage({ width: 800, height: 1200, bytes: jpeg(8) });
+    for (let i = 0; i < 3; i++) builder.addPage({ width: 800, height: 1200, bytes: jpeg(8) });
     const body = await text(builder.finish());
     assert.ok(body.includes('/Type /Pages /Count 3 /Kids [4 0 R 7 0 R 10 0 R]'));
   });
 
   it('embeds each JPEG as a DCTDecode stream of the right length', async () => {
     const builder = pdfBuilder();
-    builder.addImage({ width: 640, height: 480, bytes: jpeg(37) });
+    builder.addPage({ width: 640, height: 480, bytes: jpeg(37) });
     const body = await text(builder.finish());
     assert.ok(body.includes('/Filter /DCTDecode /Length 37'));
     assert.ok(body.includes('/Width 640 /Height 480'));
@@ -73,7 +73,7 @@ describe('pdfBuilder', () => {
 
   it('defaults to A4 pages with the bitmap fitted and centred', async () => {
     const builder = pdfBuilder();
-    builder.addImage({ width: 1200, height: 1600, bytes: jpeg(8) });
+    builder.addPage({ width: 1200, height: 1600, bytes: jpeg(8) });
     const body = await text(builder.finish());
     assert.ok(body.includes('/MediaBox [0 0 595.28 841.89]'));
     // Fitted on width, so the bands are top and bottom: 595.28 * 1600/1200.
@@ -82,13 +82,13 @@ describe('pdfBuilder', () => {
 
   it('writes the paper size it was asked for', async () => {
     const letter = pdfBuilder({ paper: 'letter' });
-    letter.addImage({ width: 1200, height: 1600, bytes: jpeg(8) });
+    letter.addPage({ width: 1200, height: 1600, bytes: jpeg(8) });
     assert.ok((await text(letter.finish())).includes('/MediaBox [0 0 612.00 792.00]'));
   });
 
   it('keeps the capture aspect ratio at 612 points wide for native paper', async () => {
     const builder = pdfBuilder({ paper: 'native' });
-    builder.addImage({ width: 1200, height: 1600, bytes: jpeg(8) });
+    builder.addPage({ width: 1200, height: 1600, bytes: jpeg(8) });
     const body = await text(builder.finish());
     assert.ok(body.includes('/MediaBox [0 0 612.00 816.00]'));
     assert.ok(body.includes('612.00 0 0 816.00 0.00 0.00 cm'));
@@ -96,13 +96,13 @@ describe('pdfBuilder', () => {
 
   it('turns the sheet sideways for a landscape capture', async () => {
     const builder = pdfBuilder({ paper: 'a4' });
-    builder.addImage({ width: 2000, height: 1200, bytes: jpeg(8) });
+    builder.addPage({ width: 2000, height: 1200, bytes: jpeg(8) });
     assert.ok((await text(builder.finish())).includes('/MediaBox [0 0 841.89 595.28]'));
   });
 
   it('leaves out the text layer when no words are given', async () => {
     const builder = pdfBuilder();
-    builder.addImage({ width: 800, height: 1200, bytes: jpeg(8) });
+    builder.addPage({ width: 800, height: 1200, bytes: jpeg(8) });
     const body = await text(builder.finish());
     assert.ok(!body.includes(' Tj'));
     assert.equal(builder.textPages, 0);
@@ -110,7 +110,7 @@ describe('pdfBuilder', () => {
 
   it('draws OCR words invisibly, after the image', async () => {
     const builder = pdfBuilder({ paper: 'native' });
-    builder.addImage(
+    builder.addPage(
       { width: 1200, height: 1600, bytes: jpeg(8) },
       [word('Hello', 0, 0, 120, 40)]
     );
@@ -126,7 +126,7 @@ describe('pdfBuilder', () => {
 
   it('counts /Length over the text layer too, so the stream is not truncated', async () => {
     const builder = pdfBuilder();
-    builder.addImage(
+    builder.addPage(
       { width: 800, height: 1200, bytes: jpeg(8) },
       [word('searchable', 10, 10, 200, 40)]
     );
@@ -139,7 +139,7 @@ describe('pdfBuilder', () => {
 
   it('names the Helvetica font every page refers to', async () => {
     const builder = pdfBuilder();
-    builder.addImage({ width: 800, height: 1200, bytes: jpeg(8) });
+    builder.addPage({ width: 800, height: 1200, bytes: jpeg(8) });
     const body = await text(builder.finish());
     assert.ok(body.includes('/Font << /F1 3 0 R >>'));
     assert.ok(body.includes('3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'));
@@ -147,7 +147,7 @@ describe('pdfBuilder', () => {
 
   it('writes an xref offset for every object it emitted', async () => {
     const builder = pdfBuilder();
-    for (let i = 0; i < 2; i++) builder.addImage({ width: 800, height: 1200, bytes: jpeg(8) });
+    for (let i = 0; i < 2; i++) builder.addPage({ width: 800, height: 1200, bytes: jpeg(8) });
     const body = await text(builder.finish());
     // 3 fixed objects + 3 per page, plus the free entry at index 0.
     assert.ok(body.includes('xref\n0 10\n0000000000 65535 f \n'));
@@ -156,7 +156,7 @@ describe('pdfBuilder', () => {
 
   it('points startxref at the real byte offset of the xref table', async () => {
     const builder = pdfBuilder();
-    builder.addImage({ width: 800, height: 1200, bytes: jpeg(64) });
+    builder.addPage({ width: 800, height: 1200, bytes: jpeg(64) });
     const body = await text(builder.finish());
     const declared = Number(body.match(/startxref\n(\d+)\n%%EOF$/)![1]);
     assert.equal(body.indexOf('xref\n0 ', declared), declared);
@@ -164,7 +164,7 @@ describe('pdfBuilder', () => {
 
   it('records byte offsets that land on each object header', async () => {
     const builder = pdfBuilder();
-    builder.addImage({ width: 800, height: 1200, bytes: jpeg(24) }, [word('word', 1, 1, 50, 20)]);
+    builder.addPage({ width: 800, height: 1200, bytes: jpeg(24) }, [word('word', 1, 1, 50, 20)]);
     const body = await text(builder.finish());
     // '\nxref\n', not 'xref\n': the latter also matches inside 'startxref'.
     const table = body.slice(body.lastIndexOf('\nxref\n'));
@@ -179,7 +179,7 @@ describe('pdfBuilder', () => {
     const build = (withFlush: boolean): Blob => {
       const builder = pdfBuilder();
       for (let i = 0; i < 3; i++) {
-        builder.addImage({ width: 800, height: 1200, bytes: jpeg(16) });
+        builder.addPage({ width: 800, height: 1200, bytes: jpeg(16) });
         if (withFlush) builder.flush();
       }
       return builder.finish();
@@ -191,5 +191,72 @@ describe('pdfBuilder', () => {
     const body = await text(pdfBuilder().finish());
     assert.ok(body.includes('/Type /Pages /Count 0 /Kids []'));
     assert.ok(body.endsWith('%%EOF'));
+  });
+
+  it('skips a page with no bitmap, which a scan cannot show', () => {
+    const builder = pdfBuilder();
+    builder.addPage({ width: 800, height: 1200 }, [word('alone', 0, 0, 60, 20)]);
+    assert.equal(builder.pages, 0);
+  });
+});
+
+describe('pdfBuilder in text mode', () => {
+  const page = { width: 1200, height: 1600 };
+
+  it('embeds no bitmap at all, not even one it was given', async () => {
+    const builder = pdfBuilder({ mode: 'text' });
+    builder.addPage({ ...page, bytes: jpeg(37) }, [word('Hello', 0, 0, 120, 40)]);
+    const body = await text(builder.finish());
+    assert.ok(!body.includes('/XObject'));
+    assert.ok(!body.includes('/DCTDecode'));
+    assert.ok(!body.includes(' Do\n'));
+  });
+
+  it('paints the words instead of hiding them', async () => {
+    const builder = pdfBuilder({ mode: 'text' });
+    builder.addPage(page, [word('Hello', 0, 0, 120, 40)]);
+    const body = await text(builder.finish());
+    assert.ok(body.includes('0 Tr'));
+    assert.ok(!body.includes('3 Tr'));
+    assert.ok(body.includes('(Hello) Tj'));
+    assert.equal(builder.textPages, 1);
+  });
+
+  it('sets the text in a serif, which is what a book was set in', async () => {
+    const builder = pdfBuilder({ mode: 'text' });
+    builder.addPage(page, [word('Hello', 0, 0, 120, 40)]);
+    const body = await text(builder.finish());
+    assert.ok(body.includes('/BaseFont /Times-Roman'));
+  });
+
+  it('keeps a page with no words, so the numbering still matches the book', async () => {
+    const builder = pdfBuilder({ mode: 'text' });
+    builder.addPage(page);
+    builder.addPage(page, [word('two', 0, 0, 40, 20)]);
+    const body = await text(builder.finish());
+    assert.equal(builder.pages, 2);
+    assert.equal(builder.textPages, 1);
+    // Two ids a page rather than three: there is no image object between them.
+    assert.ok(body.includes('/Type /Pages /Count 2 /Kids [4 0 R 6 0 R]'));
+    assert.ok(body.includes('5 0 obj\n<< /Length 0 >>\nstream\nendstream'));
+  });
+
+  it('puts the sheet on the same geometry the scanned export uses', async () => {
+    const builder = pdfBuilder({ mode: 'text', paper: 'letter' });
+    builder.addPage(page, [word('x', 0, 0, 40, 40)]);
+    assert.ok((await text(builder.finish())).includes('/MediaBox [0 0 612.00 792.00]'));
+  });
+
+  it('writes an xref offset for every object it emitted', async () => {
+    const builder = pdfBuilder({ mode: 'text' });
+    for (let i = 0; i < 2; i++) builder.addPage(page, [word('w', 0, 0, 20, 20)]);
+    const body = await text(builder.finish());
+    assert.ok(body.includes('xref\n0 8\n0000000000 65535 f \n'));
+    const table = body.slice(body.lastIndexOf('\nxref\n'));
+    const offsets = [...table.matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
+    assert.equal(offsets.length, 7);
+    offsets.forEach((offset, i) => {
+      assert.ok(body.startsWith(`${i + 1} 0 obj\n`, offset), `object ${i + 1} offset is wrong`);
+    });
   });
 });

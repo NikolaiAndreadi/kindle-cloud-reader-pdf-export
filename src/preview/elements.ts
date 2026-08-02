@@ -18,6 +18,7 @@ export const ui = {
   ocrStatus: required('ocrStatus'),
   paper: required<HTMLSelectElement>('paper'),
   save: required<HTMLButtonElement>('save'),
+  saveText: required<HTMLButtonElement>('saveText'),
   saveStatus: required('saveStatus'),
   clear: required<HTMLButtonElement>('clear')
 };
