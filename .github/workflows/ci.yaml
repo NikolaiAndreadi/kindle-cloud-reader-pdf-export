@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck, lint and test
+        run: npm run check
+
+      - name: Committed bundles match src/
+        run: |
+          npm run build
+          if ! git diff --exit-code -- background.js content.js popup.js preview.js; then
+            echo "::error::Bundles are stale. Run 'npm run build' and commit the result."
+            exit 1
+          fi
+
+      - name: vendor/tesseract is unmodified
+        run: |
+          npm run vendor
+          if ! git diff --exit-code -- vendor/tesseract; then
+            echo "::error::vendor/tesseract differs from the packaged upstream copy."
+            exit 1
+          fi
