@@ -162,6 +162,44 @@ describe('saveCachedPdf in text mode', () => {
     assert.equal(store.saved.blob, undefined);
   });
 
+  it('keeps a flagged page as its bitmap, with the words hidden over it', async () => {
+    const flagged = meta(2);
+    flagged.captures[1]!.asImage = true;
+    put(metaKey(BOOK), flagged);
+    for (let i = 1; i <= 2; i++) put(pageKey(BOOK, i), page(i, 800, 1200));
+    for (let i = 1; i <= 2; i++) put(ocrKey(BOOK, i, `fp-${i}`), recognised(i, 800, 1200));
+
+    const result = await saveCachedPdf(BOOK, { paper: 'a4', mode: 'text' }, () => {});
+    const pdf = await body(store.saved.blob);
+    // One bitmap, for the flagged page alone; the other page is still vector.
+    assert.equal(pdf.match(/\/DCTDecode/g)?.length, 1);
+    assert.ok(pdf.includes('0 Tr'), 'the unflagged page is painted');
+    assert.ok(pdf.includes('3 Tr'), 'the picture page keeps an invisible layer');
+    assert.match(result.message, /1 page kept as pictures/);
+  });
+
+  it('reads no bitmap for a page that is not flagged, however large the book', async () => {
+    put(metaKey(BOOK), meta(2));
+    for (let i = 1; i <= 2; i++) put(pageKey(BOOK, i), page(i, 800, 1200));
+    for (let i = 1; i <= 2; i++) put(ocrKey(BOOK, i, `fp-${i}`), recognised(i, 800, 1200));
+
+    await saveCachedPdf(BOOK, { paper: 'a4', mode: 'text' }, () => {});
+    assert.ok(!(await body(store.saved.blob)).includes('/DCTDecode'));
+  });
+
+  it('falls back to type when a flagged page has lost its bitmap', async () => {
+    const flagged = meta(1);
+    flagged.captures[0]!.asImage = true;
+    put(metaKey(BOOK), flagged);
+    put(ocrKey(BOOK, 1, 'fp-1'), recognised(1, 800, 1200));
+
+    const result = await saveCachedPdf(BOOK, { paper: 'a4', mode: 'text' }, () => {});
+    const pdf = await body(store.saved.blob);
+    assert.ok(!pdf.includes('/DCTDecode'));
+    assert.ok(pdf.includes('(word) Tj'), 'the words are still worth having');
+    assert.match(result.message, /1 page could not be read/);
+  });
+
   it('names the file apart from the scanned export', async () => {
     put(metaKey(BOOK), meta(1));
     put(ocrKey(BOOK, 1, 'fp-1'), recognised(1, 800, 1200));

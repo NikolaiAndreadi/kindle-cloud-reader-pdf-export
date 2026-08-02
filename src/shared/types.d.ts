@@ -22,6 +22,13 @@ interface CaptureRecord {
   fingerprint: string;
   /** For display only — see ReaderPosition. */
   page: number | null;
+  /**
+   * Keep this page as a bitmap in the text PDF instead of setting it as type:
+   * a plate, a map, a page the recogniser made nothing of. Undefined means the
+   * question has not been settled — OCR writes it when the page scores as a
+   * picture, and the checkbox in the preview writes it either way.
+   */
+  asImage?: boolean;
 }
 
 interface BookMeta {
@@ -61,6 +68,11 @@ interface StoredOcr {
   words: OcrWord[];
   /** Mean word confidence, 0–100. */
   confidence: number;
+  /**
+   * How much of the page was ink no word accounted for, 0–1 — see pictureScore.
+   * Absent on records written before the measure existed.
+   */
+  picture?: number;
 }
 
 /**
@@ -164,6 +176,8 @@ interface PdfOptions {
 interface PdfBuilder {
   readonly pages: number;
   readonly textPages: number;
+  /** Pages that carry a bitmap — every page of a scan, the plates of a text PDF. */
+  readonly imagePages: number;
   addPage(page: PdfPage, words?: OcrWord[]): void;
   /** Coalesce buffered output into a Blob so it can leave the JS heap. */
   flush(): void;

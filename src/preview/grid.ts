@@ -1,8 +1,8 @@
 import { scanRunning } from '../shared/scanning.ts';
 import {
-  deleteCapture, fingerprintCounts, recognisedIndexes, reorderCaptures
+  deleteCapture, fingerprintCounts, recognisedIndexes, reorderCaptures, setCaptureAsImage
 } from '../shared/storage.ts';
-import { message, plural, span, ui } from './elements.ts';
+import { EMPTY_TEXT, message, plural, span, ui } from './elements.ts';
 
 /** How long a delete button stays armed before it goes back to being safe. */
 const ARM_MS = 3000;
@@ -16,6 +16,8 @@ interface Tile {
   text: string;
   /** Says "text" once this page has an OCR layer stored. */
   mark: HTMLSpanElement;
+  /** Keep this page as a bitmap in the text PDF — see CaptureRecord.asImage. */
+  asImage: HTMLInputElement;
   remove: HTMLButtonElement;
   fingerprint: string;
   /** "2408×1448", or null for a capture missing from storage. */
@@ -52,6 +54,11 @@ export class PreviewGrid {
 
   recognisedCount(): number {
     return this.records.filter((capture) => this.recognised.has(capture.index)).length;
+  }
+
+  /** How many pages the text PDF would keep as bitmaps. */
+  imageCount(): number {
+    return this.records.filter((capture) => capture.asImage).length;
   }
 
   showMessage(text: string): void {
@@ -104,6 +111,7 @@ export class PreviewGrid {
     for (const tile of this.tiles.values()) {
       tile.figure.draggable = !value;
       tile.remove.disabled = value;
+      tile.asImage.disabled = value;
     }
   }
 
@@ -134,11 +142,15 @@ export class PreviewGrid {
     let duplicates = 0;
     for (const count of counts.values()) duplicates += count - 1;
 
+    const byIndex = new Map(this.records.map((capture) => [capture.index, capture]));
     for (const [index, tile] of this.tiles) {
       const repeated = (counts.get(tile.fingerprint) || 0) > 1;
       tile.figure.classList.toggle('dupe', repeated);
       tile.label.textContent = tile.text + (repeated ? ' · repeat' : '');
       tile.mark.textContent = this.recognised.has(index) ? 'text' : '';
+      // An OCR run flags the pages it reads as pictures, so this changes under
+      // the grid rather than only when the box is clicked.
+      tile.asImage.checked = byIndex.get(index)?.asImage === true;
     }
 
     // Built from nodes rather than innerHTML: this is an extension page, so
@@ -227,10 +239,57 @@ export class PreviewGrid {
       this.records = meta.captures;
       this.tiles.delete(index);
       figure.remove();
-      if (!this.records.length) this.showMessage('Nothing cached for this book yet.');
+      if (!this.records.length) this.showMessage(EMPTY_TEXT);
       else this.refresh();
     } catch (error) {
       button.disabled = this.editLocked;
+      this.showError(error);
+    }
+  }
+
+  /**
+   * The per-page "img" box: keep this one as a bitmap when the text PDF is
+   * written. It only means anything to that export — a scan is all bitmaps — so
+   * it is a quiet box in the caption rather than a control of its own.
+   *
+   * An OCR run ticks it for any page whose ink its words do not account for, and
+   * a click here overrules that for good: the run only writes the flag where
+   * nothing has decided it yet.
+   */
+  private imageBox(capture: CaptureRecord): { box: HTMLInputElement; control: HTMLLabelElement } {
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'asimg';
+    box.checked = capture.asImage === true;
+    box.disabled = this.editLocked;
+
+    const control = document.createElement('label');
+    control.className = 'asimg';
+    control.title =
+      'Keep this page as an image in the text PDF — for plates, maps and anything OCR cannot set as type.';
+    control.append(box, span('img'));
+    // Dragging from the label would reorder the book instead of ticking the box.
+    control.draggable = false;
+
+    box.addEventListener('change', () => void this.setAsImage(capture, box));
+    return { box, control };
+  }
+
+  private async setAsImage(capture: CaptureRecord, box: HTMLInputElement): Promise<void> {
+    const wanted = box.checked;
+    try {
+      if (!await this.mayEdit()) {
+        // The lock has just disabled the box; put it back to what storage says.
+        box.checked = !wanted;
+        return;
+      }
+      const meta = await setCaptureAsImage(
+        this.book, capture.index, capture.fingerprint, wanted
+      );
+      this.records = meta.captures;
+      this.refresh();
+    } catch (error) {
+      box.checked = !wanted;
       this.showError(error);
     }
   }
@@ -264,11 +323,12 @@ export class PreviewGrid {
     }
 
     const mark = span(this.recognised.has(capture.index) ? 'text' : '', 'text');
+    const { box: asImage, control } = this.imageBox(capture);
     const remove = this.deleteButton(capture.index, figure);
-    caption.append(mark, remove);
+    caption.append(mark, control, remove);
     figure.append(caption);
     this.tiles.set(capture.index, {
-      figure, label, text, mark, remove,
+      figure, label, text, mark, asImage, remove,
       fingerprint: capture.fingerprint,
       size: page?.width && page.height ? `${page.width}×${page.height}` : null
     });

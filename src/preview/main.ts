@@ -1,7 +1,7 @@
 import { scanRunning } from '../shared/scanning.ts';
 import { loadMeta, pagesInBatches } from '../shared/storage.ts';
 import { BookActions } from './actions.ts';
-import { message, ui } from './elements.ts';
+import { EMPTY_TEXT, message, ui } from './elements.ts';
 import { PreviewGrid } from './grid.ts';
 import { OcrController } from './ocr.ts';
 
@@ -40,7 +40,7 @@ async function load(): Promise<void> {
   const meta = await loadMeta(book);
   if (mine !== generation) return;
   if (!meta.captures.length) {
-    grid.showMessage('Nothing cached for this book yet.');
+    grid.showMessage(EMPTY_TEXT);
     return;
   }
 

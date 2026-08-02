@@ -6,6 +6,8 @@
 // itself arrives as a plain <script> in preview.html rather than through the
 // bundle, which keeps a 60 KB minified blob out of preview.js.
 
+import { type PictureSample, SAMPLE_SIDE, pictureScore } from './picture.ts';
+
 /** OEM.LSTM_ONLY. A number here because the enum lives in the vendored script. */
 const OEM_LSTM_ONLY = 1;
 
@@ -65,6 +67,28 @@ export interface Recogniser {
 export interface PageWords {
   words: OcrWord[];
   confidence: number;
+  /** How much of the page is ink no word accounts for — see pictureScore. */
+  picture: number;
+}
+
+/**
+ * A thumbnail of what was just recognised, for the picture score.
+ *
+ * Drawn from the same canvas the recogniser read, so it costs a downscale and no
+ * decode. Its own canvas per recogniser, for the reason draw() has one: two
+ * lanes sharing it would sample each other's pages.
+ */
+function sample(source: HTMLCanvasElement, thumbnail: HTMLCanvasElement): PictureSample | null {
+  const scale = Math.min(1, SAMPLE_SIDE / Math.max(source.width, source.height));
+  const width = Math.max(1, Math.round(source.width * scale));
+  const height = Math.max(1, Math.round(source.height * scale));
+  thumbnail.width = width;
+  thumbnail.height = height;
+  const context = thumbnail.getContext('2d', { alpha: false, willReadFrequently: true });
+  if (!context) return null;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(source, 0, 0, width, height);
+  return context.getImageData(0, 0, width, height);
 }
 
 /**
@@ -147,6 +171,7 @@ export async function createRecogniser(onLoad?: (status: string) => void): Promi
   });
 
   const scratch = document.createElement('canvas');
+  const thumbnail = document.createElement('canvas');
 
   return {
     async page(dataUrl: string, width: number, height: number): Promise<PageWords> {
@@ -188,9 +213,13 @@ export async function createRecogniser(onLoad?: (status: string) => void): Promi
           }
         }
       }
+      // After the words, and from the canvas rather than the data URL: the boxes
+      // are what the ink is measured against, and the pixels are already here.
+      const thumb = sample(scratch, thumbnail);
       return {
         words,
-        confidence: words.length ? Math.round(confidence / words.length) : 0
+        confidence: words.length ? Math.round(confidence / words.length) : 0,
+        picture: thumb ? Math.round(pictureScore(thumb, words, width, height) * 1000) / 1000 : 0
       };
     },
     close(): Promise<void> {

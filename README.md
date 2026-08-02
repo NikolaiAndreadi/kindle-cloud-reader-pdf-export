@@ -40,9 +40,10 @@ Licenses and exact upstream versions are listed in
    while a scan is running.
 6. Stop whenever you like; the captured pages remain cached per book.
 7. Choose **See captured pages and save PDF**. Everything that acts on the whole
-   book lives on that page: reordering, deleting single pages, **Add searchable
-   text (OCR)**, the **Page size**, **Save PDF** and **Save text PDF** in the top
-   right, and **Clear this book**.
+   book lives on that page: reordering, deleting single pages, marking a page
+   **img** to keep it as a picture, **Add searchable text (OCR)**, the
+   **Page size**, **Save PDF** and **Save text PDF** in the top right, and
+   **Clear this book**.
 
 Keep the reader tab visible while it scans. If pages are skipped, choose the slower
 page delay.
@@ -150,14 +151,40 @@ sizes without anything having to guess at the structure of the page. Nothing is
 reflowed and no font is embedded, which is why the file comes out on the order of
 a hundredth the size and stays sharp at any zoom.
 
-What it costs is everything that was not text: plates, rules, ornaments and drop
-caps are not carried across, and a misread word is a misread word rather than a
-picture of the right one. It is enabled only once some page has been recognised,
-and a page OCR found nothing on is written as a blank sheet so the numbering still
-lines up with the scan. Such a page is measured from its own stored bitmap rather
-than from its neighbours: a capture size belongs to the page, not to the book —
-an unsplit spread stays landscape — and on **Match capture** borrowing the wrong
-one would turn the sheet sideways.
+What it costs is everything that was not text: rules, ornaments and drop caps are
+not carried across, and a misread word is a misread word rather than a picture of
+the right one. It is enabled only once some page has been recognised, and a page
+OCR found nothing on is written as a blank sheet so the numbering still lines up
+with the scan. Such a page is measured from its own stored bitmap rather than from
+its neighbours: a capture size belongs to the page, not to the book — an unsplit
+spread stays landscape — and on **Match capture** borrowing the wrong one would
+turn the sheet sideways.
+
+### Pages kept as pictures
+
+Plates are the exception the text export cannot set as type, so it does not try.
+Every tile in the preview grid carries an **img** box: tick it and that page is
+written into the text PDF the way the scanned export writes it — the bitmap, with
+the recognised words invisible over the top, so a caption or a label on the figure
+is still selectable and searchable. Everything around it stays vector. Only the
+flagged pages have their images read back out of storage, which is what keeps the
+export fast on a book with a handful of plates.
+
+The box is ticked for you where it is obvious. As OCR reads a page it measures how
+much of the ink the words do not account for: on a page of prose almost every dark
+pixel is inside a word box, and what is left is a folio, a rule, a speck. On a
+plate, a map or a full-page diagram most of the ink is nowhere near a word. Above
+8% of the page, the capture is marked as one to keep. Colour counts as ink at any
+lightness, since nothing in a page of text is coloured. The same measure catches
+the case that would otherwise be worst — a page the recogniser simply failed on
+reads as ink outside boxes too, and a page that failed is exactly one to keep as a
+bitmap rather than to export as a handful of stray words.
+
+It is measured on a 200-pixel thumbnail of the page the recogniser has already
+decoded, so it costs a downscale and no second decode. A run only ever writes the
+flag where nothing has decided it yet: once you touch the box, on or off, that is
+the answer and no later run overrules it. Pages recognised before this existed
+carry no score, so their boxes start clear and stay manual.
 
 Word boxes only bound the ink, so the width of the box and the width of the same
 word in Times rarely agree. Words are condensed to fit where the serif is too

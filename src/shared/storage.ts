@@ -141,6 +141,48 @@ export async function* pagesInBatches(
   }
 }
 
+/**
+ * Mark, or unmark, a page as one to keep as a bitmap in the text PDF.
+ *
+ * `null` puts it back to undecided. The index is re-read rather than patched in
+ * place for the reason reorderCaptures gives: a scan in another tab may have
+ * appended pages since the caller loaded it. The capture is matched on its
+ * fingerprint as well as its index, so a flag cannot land on the page that
+ * replaced the one it was set on.
+ */
+export async function setCaptureAsImage(
+  book: string, index: number, fingerprint: string, asImage: boolean | null
+): Promise<BookMeta> {
+  const meta = await loadMeta(book);
+  const capture = meta.captures.find(
+    (record) => record.index === index && record.fingerprint === fingerprint
+  );
+  if (!capture) return meta;
+  if (asImage === null) delete capture.asImage;
+  else capture.asImage = asImage;
+  await saveMeta(meta);
+  return meta;
+}
+
+/**
+ * Settle the question for a page OCR has just read, and only if nothing has
+ * settled it already: a run must never overrule the checkbox. Written into the
+ * index rather than left to be worked out from the score, so neither the preview
+ * grid nor the exporter has to read a book's worth of words back to find the
+ * plates — see recognisedIndexes for what that costs.
+ */
+export async function flagPictureCapture(
+  book: string, capture: CaptureRecord
+): Promise<void> {
+  const meta = await loadMeta(book);
+  const stored = meta.captures.find(
+    (record) => record.index === capture.index && record.fingerprint === capture.fingerprint
+  );
+  if (!stored || stored.asImage !== undefined) return;
+  stored.asImage = true;
+  await saveMeta(meta);
+}
+
 /** Takes the whole capture because its fingerprint is half of the key — see ocrKey. */
 export const storeOcr = (
   book: string, capture: CaptureRecord, result: StoredOcr

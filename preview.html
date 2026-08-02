@@ -53,6 +53,11 @@
       /* Marks the pages that already carry a text layer, so a part-finished run
          is visible on the grid rather than only in the counter. */
       figcaption .text { flex: none; opacity: .75; }
+      /* Only the text PDF reads this, so it stays quiet until it is ticked. */
+      label.asimg { flex: none; display: flex; align-items: center; gap: 2px; opacity: .55; cursor: pointer; }
+      label.asimg:hover, label.asimg:has(:checked), label.asimg:focus-within { opacity: 1; }
+      label.asimg input { margin: 0; }
+      .locked label.asimg { cursor: default; opacity: .3; }
       main { padding: 20px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
       figure { margin: 0; cursor: grab; }
       figure.dragging { opacity: .4; cursor: grabbing; }

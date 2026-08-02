@@ -5,8 +5,11 @@
 // work, the tab it runs in can be closed at any moment, and a page whose words
 // are already stored is never recognised twice.
 
-import { loadMeta, pagesInBatches, recognisedIndexes, storeOcr } from '../shared/storage.ts';
+import {
+  flagPictureCapture, loadMeta, pagesInBatches, recognisedIndexes, storeOcr
+} from '../shared/storage.ts';
 import { type Recogniser, createRecogniser } from './engine.ts';
+import { looksLikePicture } from './picture.ts';
 
 /**
  * How many pages are read at once.
@@ -155,13 +158,19 @@ export async function runOcr(book: string, options: OcrRunOptions): Promise<OcrR
               continue;
             }
             try {
-              const { words, confidence } =
+              const { words, confidence, picture } =
                 await recogniser.page(page.dataUrl, page.width, page.height);
               // A page with no words at all — a plate, a chapter break — is still
               // stored, empty. Otherwise every run would try it again forever.
               await storeOcr(book, capture, {
-                index: capture.index, width: page.width, height: page.height, words, confidence
+                index: capture.index,
+                width: page.width, height: page.height,
+                words, confidence, picture
               });
+              // Second write, and only for the pages that need it: a page whose
+              // ink the words do not account for is one the text export should
+              // keep as a bitmap, and the index is where that has to be said.
+              if (looksLikePicture(picture)) await flagPictureCapture(book, capture);
             } catch (error) {
               failure ??= error;
               return;

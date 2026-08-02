@@ -4,7 +4,8 @@ import { beforeEach, describe, it } from 'node:test';
 import type { PageWords, Recogniser } from '../../src/ocr/engine.ts';
 import { LANES, runOcr } from '../../src/ocr/run.ts';
 import {
-  emptyMeta, loadOcrBatch, ocrKey, recognisedIndexes, saveMeta, storePage
+  emptyMeta, loadMeta, loadOcrBatch, ocrKey, recognisedIndexes, saveMeta,
+  setCaptureAsImage, storePage
 } from '../../src/shared/storage.ts';
 
 /** Just enough of chrome.storage.local to exercise the module. */
@@ -48,7 +49,7 @@ async function seed(book: string, count: number): Promise<BookMeta> {
  * A recogniser that returns one word per page and counts what it was asked. Every
  * lane gets the same object, so `seen` is every page the run read, by any lane.
  */
-function fakeRecogniser(onPage?: () => Promise<void> | void) {
+function fakeRecogniser(onPage?: () => Promise<void> | void, picture = 0) {
   const seen: string[] = [];
   let closed = false;
   let inFlight = 0;
@@ -63,7 +64,7 @@ function fakeRecogniser(onPage?: () => Promise<void> | void) {
       } finally {
         inFlight -= 1;
       }
-      return { words: [{ t: 'word', x0: 0, y0: 0, x1: 10, y1: 10 }], confidence: 90 };
+      return { words: [{ t: 'word', x0: 0, y0: 0, x1: 10, y1: 10 }], confidence: 90, picture };
     },
     async close(): Promise<void> {
       closed = true;
@@ -296,5 +297,36 @@ describe('runOcr', () => {
     assert.equal((await loadOcrBatch('B001', [capture(1)])).size, 0);
     assert.equal((await recognisedIndexes('B001', [capture(1)])).size, 0);
     assert.equal(ocrKey('B001', 1, 'fp-1').includes('fp-1'), true);
+  });
+
+  it('stores the picture score with the words', async () => {
+    await seed('B001', 1);
+    await runOcr('B001', { ...silent, open: fakeRecogniser(undefined, .42).open });
+    assert.equal((await loadOcrBatch('B001', [capture(1)])).get(1)?.picture, .42);
+  });
+
+  it('marks a page as one to keep as an image when its ink is not the words', async () => {
+    await seed('B001', 2);
+    await runOcr('B001', { ...silent, open: fakeRecogniser(undefined, .5).open });
+    assert.deepEqual(
+      (await loadMeta('B001')).captures.map((record) => record.asImage), [true, true]
+    );
+  });
+
+  it('leaves a page of ordinary prose alone', async () => {
+    await seed('B001', 2);
+    await runOcr('B001', { ...silent, open: fakeRecogniser(undefined, .01).open });
+    assert.deepEqual(
+      (await loadMeta('B001')).captures.map((record) => record.asImage), [undefined, undefined]
+    );
+  });
+
+  it('never overrules a page the checkbox has already settled', async () => {
+    const meta = await seed('B001', 1);
+    // Explicitly not a picture, whatever the pixels say.
+    await setCaptureAsImage('B001', 1, 'fp-1', false);
+    await runOcr('B001', { ...silent, open: fakeRecogniser(undefined, .9).open });
+    assert.equal((await loadMeta('B001')).captures[0]?.asImage, false);
+    assert.equal(meta.captures.length, 1);
   });
 });

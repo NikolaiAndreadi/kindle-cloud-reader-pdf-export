@@ -1,16 +1,22 @@
-// OCR words turned into PDF text operators. The same words are drawn two ways.
+// OCR words turned into PDF text operators. The same words are drawn two ways,
+// and which way is a property of the page rather than of the document — a text
+// PDF keeps its picture pages as bitmaps, and those pages want the invisible
+// treatment even though everything around them is painted.
 //
-// In 'scan' mode they are drawn in rendering mode 3 — shaped, painted with
-// nothing — over the bitmap of the page. That is what a scanner means by a
-// "searchable PDF": the page still shows the photograph, but selecting, copying
-// and Ctrl-F all reach the words underneath, in the right places.
+// 'invisible' draws in rendering mode 3 — shaped, painted with nothing — over
+// the bitmap of the page. That is what a scanner means by a "searchable PDF":
+// the page still shows the photograph, but selecting, copying and Ctrl-F all
+// reach the words underneath, in the right places.
 //
-// In 'text' mode the same operators are painted, and there is no bitmap at all.
-// The page becomes vector: a few kilobytes instead of a few hundred, sharp at
-// any zoom, and still laid out where the recogniser found the words — so
-// paragraphs, indents, headings and margins keep their positions and their
-// sizes. It is only ever as true as the OCR under it, and anything that was not
-// text — plates, rules, ornaments — is not carried across.
+// 'visible' paints the same operators where there is no bitmap at all. The page
+// becomes vector: a few kilobytes instead of a few hundred, sharp at any zoom,
+// and still laid out where the recogniser found the words — so paragraphs,
+// indents, headings and margins keep their positions and their sizes. It is only
+// ever as true as the OCR under it, and anything that was not text — plates,
+// rules, ornaments — is not carried across, which is what the picture pages are
+// for.
+
+export type TextStyle = 'invisible' | 'visible';
 
 const INVISIBLE = 3;
 const FILL = 0;
@@ -66,6 +72,8 @@ const TIMES_WIDTHS = [
 ];
 
 export interface PdfFont {
+  /** The name a page's /Resources gives it, and the content stream selects. */
+  resource: string;
   /** A base-14 name, so it is never embedded. */
   baseFont: string;
   widths: number[];
@@ -74,15 +82,22 @@ export interface PdfFont {
 }
 
 export const HELVETICA: PdfFont = {
-  baseFont: 'Helvetica', widths: HELVETICA_WIDTHS, fallback: 556
+  resource: 'F1', baseFont: 'Helvetica', widths: HELVETICA_WIDTHS, fallback: 556
 };
 
 export const TIMES_ROMAN: PdfFont = {
-  baseFont: 'Times-Roman', widths: TIMES_WIDTHS, fallback: 500
+  resource: 'F2', baseFont: 'Times-Roman', widths: TIMES_WIDTHS, fallback: 500
 };
 
-export const fontFor = (mode: PdfMode): PdfFont =>
-  mode === 'text' ? TIMES_ROMAN : HELVETICA;
+/**
+ * Both are written into every document, because one document can hold pages of
+ * both kinds. Two base-14 font objects are eighty bytes each and neither is
+ * embedded, so the unused one costs nothing worth deciding about.
+ */
+export const FONTS: PdfFont[] = [HELVETICA, TIMES_ROMAN];
+
+export const fontFor = (style: TextStyle): PdfFont =>
+  style === 'visible' ? TIMES_ROMAN : HELVETICA;
 
 /**
  * Where a face's letters reach, as fractions of the em. Only used to guess a
@@ -190,11 +205,11 @@ function metricsFor(word: OcrWord, estimate: boolean): { size: number; baseline:
  * about lines, justification or hyphenation.
  */
 export function textLayerOps(
-  words: OcrWord[], place: TextPlacement, mode: PdfMode = 'scan'
+  words: OcrWord[], place: TextPlacement, style: TextStyle = 'invisible'
 ): string {
   const { scale, left, bottom, imageHeight } = place;
-  const visible = mode === 'text';
-  const font = fontFor(mode);
+  const visible = style === 'visible';
+  const font = fontFor(style);
   const maxStretch = visible ? MAX_VISIBLE_STRETCH : MAX_STRETCH;
   let out = `BT\n${visible ? FILL : INVISIBLE} Tr\n`;
   let used = 0;
@@ -217,7 +232,7 @@ export function textLayerOps(
     const x = left + word.x0 * scale;
     const y = bottom + (imageHeight - metrics.baseline) * scale;
 
-    out += `/F1 ${size.toFixed(2)} Tf ${stretch.toFixed(2)} Tz `;
+    out += `/${font.resource} ${size.toFixed(2)} Tf ${stretch.toFixed(2)} Tz `;
     out += `1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm ${pdfString(text)} Tj\n`;
     used += 1;
   }

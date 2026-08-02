@@ -61,8 +61,10 @@ export async function saveCachedPdf(
   const notes = [`${paperLabel(options.paper)} pages`];
   // In text mode the count is worth giving even when it is low: the pages it
   // leaves out are blank ones, and that is the thing to explain.
-  if (mode === 'text') notes.push(`${builder.textPages} with recognised text`);
-  else if (builder.textPages) notes.push(`${builder.textPages} with searchable text`);
+  if (mode === 'text') {
+    notes.push(`${builder.textPages} with recognised text`);
+    if (builder.imagePages) notes.push(`${plural(builder.imagePages, 'page')} kept as pictures`);
+  } else if (builder.textPages) notes.push(`${builder.textPages} with searchable text`);
   if (written.unreadable) notes.push(`${plural(written.unreadable, 'page')} could not be read`);
   // Returned rather than reported: this is the outcome, and it should stay on
   // screen after the progress line it replaces has stopped changing.
@@ -129,20 +131,25 @@ async function writeTextPages(
   let waiting = 0;
 
   for await (const batch of ocrInBatches(book, meta.captures)) {
-    // A capture size is per page, not per book: split mode leaves a landscape
-    // spread landscape, and the reader repaints at whatever size the window is
-    // when a later session resumes. Borrowing a neighbour's dimensions for a
-    // blank page would turn the sheet sideways on native paper, so the page's
-    // own record is read where OCR cannot say — for the blanks alone, since
-    // their data URLs are the weight this export exists to avoid.
-    const blanks = batch.filter(({ ocr }) => !sizeOf(ocr)).map(({ capture }) => capture);
-    const pages = blanks.length ? await loadPageBatch(book, blanks) : undefined;
+    // Two reasons to want a page record here, and both are the exception rather
+    // than the rule — which is what keeps this export off the data URLs.
+    //
+    // A page kept as a picture needs its bitmap, obviously. A page OCR cannot
+    // measure needs its dimensions: a capture size is per page, not per book —
+    // split mode leaves a landscape spread landscape, and the reader repaints at
+    // whatever size the window is when a later session resumes — so borrowing a
+    // neighbour's would turn the sheet sideways on native paper.
+    const wanted = batch
+      .filter(({ capture, ocr }) => capture.asImage || !sizeOf(ocr))
+      .map(({ capture }) => capture);
+    const pages = wanted.length ? await loadPageBatch(book, wanted) : undefined;
 
     for (const { capture, ocr } of batch) {
       // A record with no dimensions cannot place its own boxes, so it is no
       // better than no record at all.
       const measured = sizeOf(ocr) ? ocr : undefined;
-      const size = sizeOf(measured) ?? sizeOf(pages?.get(capture.index));
+      const stored = pages?.get(capture.index);
+      const size = sizeOf(measured) ?? sizeOf(stored);
       if (!size) {
         // Neither words nor a bitmap: the page is gone from storage. It still
         // gets a sheet, at whatever size its neighbours were.
@@ -155,10 +162,23 @@ async function writeTextPages(
         continue;
       }
 
-      previous = size;
-      for (; waiting > 0; waiting--) builder.addPage(size);
-      builder.addPage(size, measured?.words);
+      // Handing over bytes is what tells the writer to keep this page as a
+      // picture, so they are fetched for the flagged pages and nothing else.
+      // Words measured on another size would land wrong over the bitmap, the
+      // same check the scanned export makes.
+      const bytes = capture.asImage && stored?.dataUrl && sizeOf(stored)
+        ? bytesFromDataUrl(stored.dataUrl) ?? undefined
+        : undefined;
+      const placeable = bytes
+        ? measured?.width === stored?.width && measured?.height === stored?.height
+        : true;
+
+      previous = bytes ? sizeOf(stored) ?? size : size;
+      for (; waiting > 0; waiting--) builder.addPage(previous);
+      builder.addPage(bytes ? { ...previous, bytes } : previous,
+        placeable ? measured?.words : undefined);
       if (measured) recognised += 1;
+      if (capture.asImage && !bytes) unreadable += 1;
     }
     builder.flush();
     report(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);

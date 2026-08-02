@@ -2,7 +2,7 @@ import { saveCachedPdf } from '../pdf/export.ts';
 import { DEFAULT_PAPER, isPaperName } from '../pdf/paper.ts';
 import { scanRunning } from '../shared/scanning.ts';
 import { clearBook, loadPaper, savePaper } from '../shared/storage.ts';
-import { message, plural, ui } from './elements.ts';
+import { EMPTY_TEXT, message, plural, ui } from './elements.ts';
 import type { PreviewGrid } from './grid.ts';
 
 /** How long "Clear this book" is held before it fires. */
@@ -65,9 +65,11 @@ export class BookActions {
     // write until some page has been recognised. Said on the button rather than
     // after the click, since the run it asks for takes minutes.
     const recognised = this.grid.recognisedCount();
+    const pictures = this.grid.imageCount();
     ui.saveText.disabled = empty || this.saving || !recognised;
     ui.saveText.title = recognised
-      ? `Vector text only, from ${plural(recognised, 'recognised page')} — no page images.`
+      ? `Vector text from ${plural(recognised, 'recognised page')}${
+        pictures ? `, keeping ${plural(pictures, 'page')} as images` : ' — no page images'}.`
       : 'Add searchable text (OCR) first: a text PDF is made of the recognised words.';
     ui.clear.disabled = empty || this.saving || this.ocrBusy || this.grid.locked;
   }
@@ -100,8 +102,11 @@ export class BookActions {
       this.describe();
       return;
     }
-    const cleared = await clearBook(this.book);
-    this.grid.showMessage(`Cleared ${plural(cleared, 'saved page')}. Scan again to refill this book.`);
+    await clearBook(this.book);
+    // The same empty state the page shows for a book with nothing in it: the
+    // grid going empty is the confirmation, and a count of what was just
+    // deliberately deleted is not news.
+    this.grid.showMessage(EMPTY_TEXT);
   }
 
   /**

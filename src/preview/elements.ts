@@ -23,6 +23,9 @@ export const ui = {
   clear: required<HTMLButtonElement>('clear')
 };
 
+/** Said wherever a book turns out to have no pages: on load, and after a clear. */
+export const EMPTY_TEXT = 'Nothing captured for this book yet.';
+
 export const plural = (n: number, word: string): string =>
   `${n} ${word}${n === 1 ? '' : 's'}`;
 

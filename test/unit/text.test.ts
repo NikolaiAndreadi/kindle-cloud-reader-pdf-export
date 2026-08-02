@@ -138,8 +138,10 @@ describe('textLayerOps', () => {
 
   it('paints the glyphs in text mode, and measures them in the serif', () => {
     const ops = textLayerOps([{ t: 'll', x0: 0, y0: 0, x1: 5.56, y1: 10, b: 10, s: 10 }],
-      place, 'text');
+      place, 'visible');
     assert.ok(ops.startsWith('BT\n0 Tr\n'));
+    // The serif is /F2; the invisible layer keeps the sans it has always used.
+    assert.ok(ops.includes('/F2 10.00 Tf'), ops);
     // Times 'l' is 278/1000, so 'll' is 5.56pt at a 10pt size: no stretch needed.
     assert.ok(ops.includes('100.00 Tz'), ops);
   });
@@ -147,12 +149,12 @@ describe('textLayerOps', () => {
   it('leaves the slack after a painted word rather than letterspacing it', () => {
     // A box far wider than the serif needs: the word keeps its own proportions
     // and starts where it was found, and the gap falls where a space goes.
-    const ops = textLayerOps([word('ll', 0, 0, 100, 10)], place, 'text');
+    const ops = textLayerOps([word('ll', 0, 0, 100, 10)], place, 'visible');
     assert.ok(ops.includes('105.00 Tz'), ops);
   });
 
   it('still condenses a painted word that would otherwise run into the next', () => {
-    const ops = textLayerOps([word('milliner', 0, 0, 10, 10)], place, 'text');
+    const ops = textLayerOps([word('milliner', 0, 0, 10, 10)], place, 'visible');
     assert.ok(/ (\d\d?\.\d\d) Tz/.test(ops), ops);
     assert.ok(Number(ops.match(/ (\d+\.\d\d) Tz/)![1]) < 100, ops);
   });
@@ -160,16 +162,16 @@ describe('textLayerOps', () => {
   it('reads the letters to size a painted word the line gave no metrics for', () => {
     // A 9px box of x-height only: 'one' reaches neither up nor down, so the em
     // is 9 / 0.45 = 20 and the baseline is the bottom of the box.
-    const ops = textLayerOps([word('one', 0, 491, 30, 500)], place, 'text');
-    assert.ok(ops.includes('/F1 20.00 Tf'), ops);
+    const ops = textLayerOps([word('one', 0, 491, 30, 500)], place, 'visible');
+    assert.ok(ops.includes('/F2 20.00 Tf'), ops);
     assert.ok(ops.includes('1 0 0 1 0.00 500.00 Tm'), ops);
   });
 
   it('lifts a painted word off its descenders rather than sitting the line on them', () => {
     // 'flight' has ascenders and a descender: 0.7 + 0.21 of a 20px em is 18.2px,
     // and the baseline is 0.21 em above the bottom of the box.
-    const ops = textLayerOps([word('flight', 0, 481.8, 30, 500)], place, 'text');
-    assert.ok(ops.includes('/F1 20.00 Tf'), ops);
+    const ops = textLayerOps([word('flight', 0, 481.8, 30, 500)], place, 'visible');
+    assert.ok(ops.includes('/F2 20.00 Tf'), ops);
     assert.ok(ops.includes('1 0 0 1 0.00 504.20 Tm'), ops);
   });
 

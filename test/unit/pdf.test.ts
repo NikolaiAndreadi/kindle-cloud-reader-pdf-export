@@ -60,7 +60,8 @@ describe('pdfBuilder', () => {
     const builder = pdfBuilder();
     for (let i = 0; i < 3; i++) builder.addPage({ width: 800, height: 1200, bytes: jpeg(8) });
     const body = await text(builder.finish());
-    assert.ok(body.includes('/Type /Pages /Count 3 /Kids [4 0 R 7 0 R 10 0 R]'));
+    // Ids 1–4 are the catalog, the page tree and the two fonts.
+    assert.ok(body.includes('/Type /Pages /Count 3 /Kids [5 0 R 8 0 R 11 0 R]'));
   });
 
   it('embeds each JPEG as a DCTDecode stream of the right length', async () => {
@@ -137,21 +138,22 @@ describe('pdfBuilder', () => {
     assert.equal(body.slice(start + declared, start + declared + 9), 'endstream');
   });
 
-  it('names the Helvetica font every page refers to', async () => {
+  it('names both fonts on every page, whichever one the page uses', async () => {
     const builder = pdfBuilder();
     builder.addPage({ width: 800, height: 1200, bytes: jpeg(8) });
     const body = await text(builder.finish());
-    assert.ok(body.includes('/Font << /F1 3 0 R >>'));
+    assert.ok(body.includes('/Font << /F1 3 0 R /F2 4 0 R >>'));
     assert.ok(body.includes('3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'));
+    assert.ok(body.includes('4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>'));
   });
 
   it('writes an xref offset for every object it emitted', async () => {
     const builder = pdfBuilder();
     for (let i = 0; i < 2; i++) builder.addPage({ width: 800, height: 1200, bytes: jpeg(8) });
     const body = await text(builder.finish());
-    // 3 fixed objects + 3 per page, plus the free entry at index 0.
-    assert.ok(body.includes('xref\n0 10\n0000000000 65535 f \n'));
-    assert.ok(body.includes('/Size 10 /Root 1 0 R'));
+    // 4 fixed objects + 3 per page, plus the free entry at index 0.
+    assert.ok(body.includes('xref\n0 11\n0000000000 65535 f \n'));
+    assert.ok(body.includes('/Size 11 /Root 1 0 R'));
   });
 
   it('points startxref at the real byte offset of the xref table', async () => {
@@ -169,7 +171,7 @@ describe('pdfBuilder', () => {
     // '\nxref\n', not 'xref\n': the latter also matches inside 'startxref'.
     const table = body.slice(body.lastIndexOf('\nxref\n'));
     const offsets = [...table.matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
-    assert.equal(offsets.length, 6);
+    assert.equal(offsets.length, 7);
     offsets.forEach((offset, i) => {
       assert.ok(body.startsWith(`${i + 1} 0 obj\n`, offset), `object ${i + 1} offset is wrong`);
     });
@@ -203,13 +205,14 @@ describe('pdfBuilder', () => {
 describe('pdfBuilder in text mode', () => {
   const page = { width: 1200, height: 1600 };
 
-  it('embeds no bitmap at all, not even one it was given', async () => {
+  it('embeds no bitmap for a page it was given none for', async () => {
     const builder = pdfBuilder({ mode: 'text' });
-    builder.addPage({ ...page, bytes: jpeg(37) }, [word('Hello', 0, 0, 120, 40)]);
+    builder.addPage(page, [word('Hello', 0, 0, 120, 40)]);
     const body = await text(builder.finish());
     assert.ok(!body.includes('/XObject'));
     assert.ok(!body.includes('/DCTDecode'));
     assert.ok(!body.includes(' Do\n'));
+    assert.equal(builder.imagePages, 0);
   });
 
   it('paints the words instead of hiding them', async () => {
@@ -237,8 +240,48 @@ describe('pdfBuilder in text mode', () => {
     assert.equal(builder.pages, 2);
     assert.equal(builder.textPages, 1);
     // Two ids a page rather than three: there is no image object between them.
-    assert.ok(body.includes('/Type /Pages /Count 2 /Kids [4 0 R 6 0 R]'));
-    assert.ok(body.includes('5 0 obj\n<< /Length 0 >>\nstream\nendstream'));
+    assert.ok(body.includes('/Type /Pages /Count 2 /Kids [5 0 R 7 0 R]'));
+    assert.ok(body.includes('6 0 obj\n<< /Length 0 >>\nstream\nendstream'));
+  });
+
+  it('keeps a page as a picture when it is handed the bitmap', async () => {
+    const builder = pdfBuilder({ mode: 'text' });
+    builder.addPage(page, [word('vector', 0, 0, 80, 20)]);
+    builder.addPage({ ...page, bytes: jpeg(37) }, [word('plate', 0, 0, 60, 20)]);
+    const body = await text(builder.finish());
+    assert.equal(builder.pages, 2);
+    assert.equal(builder.imagePages, 1);
+    assert.equal(builder.textPages, 2);
+    assert.ok(body.includes('/Filter /DCTDecode /Length 37'));
+    // Only the picture page names an image in its resources.
+    assert.equal(body.match(/\/XObject <</g)?.length, 1);
+    assert.ok(body.indexOf('/Im1 Do') < body.indexOf('(plate) Tj'));
+  });
+
+  it('hides the words over a picture page and paints them everywhere else', async () => {
+    const builder = pdfBuilder({ mode: 'text' });
+    builder.addPage(page, [word('vector', 0, 0, 80, 20)]);
+    builder.addPage({ ...page, bytes: jpeg(8) }, [word('plate', 0, 0, 60, 20)]);
+    const body = await text(builder.finish());
+    // The painted page picks the serif, the one over the bitmap the sans it has
+    // always used — both fonts are on both pages, so either can choose.
+    assert.ok(/BT\n0 Tr\n\/F2 [\d.]+ Tf[^B]*\(vector\) Tj/.test(body), body);
+    assert.ok(/BT\n3 Tr\n\/F1 [\d.]+ Tf[^B]*\(plate\) Tj/.test(body), body);
+  });
+
+  it('gives a picture page three ids and a text page two, in the order written', async () => {
+    const builder = pdfBuilder({ mode: 'text' });
+    builder.addPage({ ...page, bytes: jpeg(8) });
+    builder.addPage(page, [word('after', 0, 0, 50, 20)]);
+    const body = await text(builder.finish());
+    // 5 page, 6 image, 7 contents; then 8 page, 9 contents.
+    assert.ok(body.includes('/Type /Pages /Count 2 /Kids [5 0 R 8 0 R]'));
+    assert.ok(body.includes('xref\n0 10\n'));
+    const table = body.slice(body.lastIndexOf('\nxref\n'));
+    const offsets = [...table.matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
+    offsets.forEach((offset, i) => {
+      assert.ok(body.startsWith(`${i + 1} 0 obj\n`, offset), `object ${i + 1} offset is wrong`);
+    });
   });
 
   it('puts the sheet on the same geometry the scanned export uses', async () => {
@@ -251,10 +294,10 @@ describe('pdfBuilder in text mode', () => {
     const builder = pdfBuilder({ mode: 'text' });
     for (let i = 0; i < 2; i++) builder.addPage(page, [word('w', 0, 0, 20, 20)]);
     const body = await text(builder.finish());
-    assert.ok(body.includes('xref\n0 8\n0000000000 65535 f \n'));
+    assert.ok(body.includes('xref\n0 9\n0000000000 65535 f \n'));
     const table = body.slice(body.lastIndexOf('\nxref\n'));
     const offsets = [...table.matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
-    assert.equal(offsets.length, 7);
+    assert.equal(offsets.length, 8);
     offsets.forEach((offset, i) => {
       assert.ok(body.startsWith(`${i + 1} 0 obj\n`, offset), `object ${i + 1} offset is wrong`);
     });
