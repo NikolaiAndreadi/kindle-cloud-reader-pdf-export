@@ -148,10 +148,12 @@ export function pdfBuilder(options: PdfOptions = {}): PdfBuilder {
       object(PAGES_ID, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] >>`);
       // Written whether or not any page carries text: two 80-byte objects are
       // cheaper than deciding, since every page's Resources already names them.
-      FONTS.forEach((font, i) => object(
-        FIRST_FONT_ID + i,
-        `<< /Type /Font /Subtype /Type1 /BaseFont /${font.baseFont} /Encoding /WinAnsiEncoding >>`
-      ));
+      FONTS.forEach((font, i) => {
+        object(
+          FIRST_FONT_ID + i,
+          `<< /Type /Font /Subtype /Type1 /BaseFont /${font.baseFont} /Encoding /WinAnsiEncoding >>`
+        );
+      });
       const xref = length;
       const count = nextId;
       push(`xref\n0 ${count}\n0000000000 65535 f \n`);

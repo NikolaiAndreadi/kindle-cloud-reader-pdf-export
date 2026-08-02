@@ -1,194 +1,162 @@
-# Personal Cloud Reader Export
+# Amazon Cloud Reader Export
 
-A small Chrome extension that captures pages already rendered by Kindle Cloud
+A Chrome extension that captures pages already rendered by Kindle Cloud
 Reader and saves them as a PDF on a real paper size, optionally with an invisible
 OCR text layer so the pages are searchable and selectable. It does not download
-Kindle book files, decrypt content, or communicate with any third-party service —
-the OCR engine is bundled and runs locally. Use it only for books and material
+Kindle book files, decrypt content, or communicate with any third-party service.
+The OCR engine is bundled and runs locally. Use it only for books and material
 you are authorized to copy.
-
-## Build
-
-```sh
-npm install
-npm run build
-```
-
-- `npm run build` — typechecks, then bundles `src/` to `content.js`, `popup.js`, `preview.js`
-- `npm run watch` — rebuild on every change (no typecheck, inline source maps)
-- `npm run typecheck` — types only, emits nothing
-- `npm run lint` — Biome; `npm run lint:fix` applies what it can
-- `npm test` — unit tests for the pure logic
-- `npm run check` — typecheck, lint and test together
-- `npm run vendor` — re-copies the OCR engine from `node_modules` into `vendor/tesseract`
-- `npm run fixture` — serves this directory on port 8973 for the offline test pages:
-  `test/fixture.html` for scanning, `test/ocr-fixture.html` for the OCR engine
-
-`vendor/tesseract` is checked in so **Load unpacked** works on a fresh clone with no
-build. Only `npm run vendor` should write to it; the build fails if a file is missing.
-Licenses and exact upstream versions are listed in
-`vendor/tesseract/THIRD_PARTY_NOTICES.md` and ship with the runtime assets.
 
 ## Install
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
-3. Click **Load unpacked** and select this directory.
+3. Click **Load unpacked** and select this directory. No build needed — the
+   bundles and the OCR engine are checked in.
 4. Open a book at <https://read.amazon.com/> (regional domains such as
    `read.amazon.co.uk` and `read.amazon.com.br` work too).
-5. Click the extension and choose **Scan / resume**. The same button says **Stop**
-   while a scan is running.
-6. Stop whenever you like; the captured pages remain cached per book.
-7. Choose **See captured pages and save PDF**. Everything that acts on the whole
-   book lives on that page: reordering, deleting single pages, marking a page
-   **img** to keep it as a picture, **Add searchable text (OCR)**, the
-   **Page size**, **Save PDF** and **Save text PDF** in the top right, and
-   **Clear this book**.
 
-Keep the reader tab visible while it scans. If pages are skipped, choose the slower
-page delay.
+## Using it
 
-## How it works
+Click the extension and choose **Scan / resume**. The same button says **Stop**
+while a scan is running. Keep the reader tab visible while it scans, and if pages
+come out skipped, choose the slower page delay.
 
-Kindle Cloud Reader only keeps the current rendered page or spread in the DOM. The
-extension copies the visible page images (`.kg-full-page-img img`, drawn at their
-full natural resolution rather than the cropped on-screen box) to JPEG, reads
-Kindle's `Page X of Y` counter from the reader footer, sends an Arrow Right event,
-and waits for the next render. Each page is saved in extension-local storage under
-the book ASIN, so later scans can skip saved pages. On request, the extension
-streams the cached JPEGs into a minimal PDF container a batch at a time, so a long
-book never has to fit in memory at once.
+The scan stops on its own at the end of the book, or when the reader stops
+advancing. Captured pages are cached per book, so you can stop whenever you like
+and pick up later — a page already captured is never re-encoded, and an identical
+view is never stored twice.
 
-One captured image is not necessarily one book page. In two-column mode the reader
-paints the whole spread as a single landscape bitmap. **Split two-page spreads**
-(on by default) cuts any landscape capture down the middle into two portrait
-pages, so the reader's layout never has to be changed by hand. A portrait capture
-is never touched, so switching the reader to single column simply turns splitting
-off by itself.
+Everything that acts on the whole book lives behind **See captured pages and save
+PDF**: reordering, deleting single pages, **Page size**, **Add searchable text
+(OCR)**, the two save buttons, and **Clear this book**.
 
-Whether the reader turned, and whether a view is new, are both decided by hashing
-the rendered pixels. Never by the counter. The counter skips numbers and repeats
-them as Amazon reflows the book for the window width, so a repeat cannot be told
-apart from a stall, and trusting it would silently drop pages.
+**Page size** writes every page onto one real sheet — **A4**, **US Letter**, or
+**Match capture** to keep whatever pixel size the reader happened to paint. The
+bitmap is fitted and centred, so a page that does not match the sheet gets even
+bands rather than being cropped or stretched.
 
-The hash comes from a 128x128 downscale of the source bitmap, which is cheap
-enough to compute before deciding whether to encode. So a view already captured
-costs almost nothing, resuming does not re-encode the whole book, and changing the
-JPEG quality between scans does not break duplicate detection. An identical view
-is never stored twice, so a reader that refuses to turn produces one page and a
-clear message rather than a run of identical pages.
+In two-column mode the reader paints a whole spread as one landscape image.
+**Split two-page spreads** (on by default) cuts those down the middle into two
+portrait pages. Portrait captures are never touched, so switching the reader to
+single column turns splitting off by itself.
 
-Page turning is probed rather than assumed. Dispatched key events carry
-`isTrusted: false` and an extension cannot forge that, so a reader that checks it
-ignores them however they are aimed. The scan tries the "Next page" chevron, key
-events on several targets, and a click near the right edge, keeps whichever one
-actually moves the reader, and records it so later scans skip the probing.
+### Searchable text
 
-The scan stops on its own when the reader stops advancing, when the page count is
-reached, when no page-turn method works, when pages cannot be copied at all, or
-when you press **Stop**.
+The reader paints pages as images, so there is no text to copy — the only route to
+a text layer is to read the pixels back. **Add searchable text (OCR)** runs
+Tesseract over the cached pages and stores the words with their positions. Reckon
+on a second or two a page, so five to ten minutes for a long book. It runs in the
+preview tab, which has to stay open but does not have to be the visible one, and
+it is resumable: results are saved as they finish, and closing the tab costs at
+most the pages in flight.
 
-## Page size
+Accuracy comes from the pixels, so it is only as good as the capture. On clean
+printed prose the **Balanced** JPEG quality is enough; **High** is the first thing
+to change if a book comes out badly. The engine is English only.
 
-Captures are whatever pixel size the reader happened to paint, which used to become
-the PDF page size — a stack of pages no printer or e-reader had a name for. Every
-page is now written on one sheet: **A4**, **US Letter**, or **Match capture** for
-the old behaviour. The bitmap is fitted inside the sheet and centred, so a shape
-that does not match leaves even bands rather than being cropped or stretched, and
-the sheet takes the orientation of the capture — a spread saved without splitting
-gets a landscape page instead of half a portrait one.
+You do not need to re-scan a book captured before you decided you wanted text.
 
-## Searchable text
+### The two exports
 
-The reader paints pages as images, so there is no text in the DOM to copy: the only
-route to a text layer is to read the pixels back. **Add searchable text (OCR)** in
-the preview page runs Tesseract over each cached page and stores the words with
-their positions. Exporting then draws them over the image in PDF rendering mode 3 —
-shaped but never painted — which is exactly what a scanner means by a searchable
-PDF. The page still looks like the capture; selecting, copying and Ctrl-F reach the
-words underneath.
+**Save PDF** is the scan: one image per page, with an invisible text layer over
+any page OCR has read. It looks exactly like the book, whether or not you ran OCR
+at all.
 
-OCR runs in the preview tab because it needs a WebAssembly engine, which an
-extension page can load and a content script cannot, and because it needs somewhere
-that stays open — roughly a second and a half a page, so five to ten minutes for a
-long book. That tab does not have to be the visible one. Two pages are read at
-once, in two independent engines: recognising is almost entirely wasm, so a second
-lane is worth close to a second core. It is resumable and interruptible: results
-are stored per page as they finish, a page that already has words is never read
-twice, and closing the tab costs at most the pages in flight. Pages with no text
-layer are still exported as images, so a part-finished run is worth having.
+**Save text PDF** drops the bitmaps and sets the recognised words as real type,
+placed where they were found, so headings, indents and margins keep their places.
+The file comes out on the order of a hundredth the size and stays sharp at any
+zoom. What it costs is everything that was not text — rules, ornaments and drop
+caps do not survive, and a misread word is a misread word rather than a picture of
+the right one. It needs OCR to have run first.
 
-Nothing has to be scanned again to add text to a cache captured before OCR existed.
-The run works off the stored pages, and an OCR record is keyed by the capture's
-pixel fingerprint as well as its index, so words can never be attached to a page
-they were not read from.
+Plates are the exception. Every tile in the preview grid has an **img** box: tick
+it and that page goes into the text PDF as the image, with the invisible words
+still over the top. Pages that are mostly picture get ticked for you, as do pages
+OCR failed on, which are exactly the ones to keep as bitmaps. Once you touch a
+box, your answer stands and no later run overrules it.
 
-Accuracy comes from the pixels, so it is only as good as the capture. Kindle paints
-roughly 150–200 dpi, below where the recogniser does its best work, so a page under
-1800 px wide is upscaled before it is read; on clean printed prose the **Balanced**
-JPEG quality is enough, and **High** is the thing to change first if a book comes
-out badly. The engine is `eng` only; it is bundled rather than fetched, which is
-both an MV3 requirement and what keeps the extension offline.
+## When it stops working
 
-`test/ocr-fixture.html` (`npm run fixture`) runs the vendored engine over a page of
-known text and reports what came back, which is the quickest way to tell a bad
-vendor copy from a bad capture.
+Expect it to. Kindle Cloud Reader is not a stable target and Amazon has no reason
+to make it one: the class names, the footer counter, the key handling and the page
+markup are all theirs to change, and a rendering path that quietly ignores a
+synthetic key event costs them nothing to ship. Assume any break lands in the
+direction of making it harder to keep the books you paid for, not easier, and
+assume no upstream fix arrives on your schedule.
 
-## The two exports
+So fork it. This repo is meant to be a foundation rather than a product — the
+tedious parts are the ones that are done, and they are the ones that do not depend
+on Amazon's markup: the per-book cache and resume, the PDF writer that streams a
+long book without holding it in memory, the invisible text layer, the paper
+fitting, the unit tests. What breaks is the thin layer that reads the page and
+turns it, and that is the part a coding agent can re-fit quickly if you hand it
+the symptom and let it read the rest.
 
-The preview page saves the same cache two ways, and the buttons sit side by side
-because neither replaces the other.
+Start in `src/content/`. Every assumption about Amazon's markup is in `dom.ts`,
+which is the whole blast radius of a reader change. A few decisions in there look
+redundant and are not — trusting the page counter instead of hashing pixels, or
+turning pages the obvious way — and each one is commented where it is made, with
+the failure it avoids. Read those before letting an agent tidy them: they all fail
+silently, by dropping pages from a scan that otherwise looks like it worked.
 
-**Save PDF** is the scan: one JPEG per page, with the invisible text layer over
-any page OCR has been over. It is exactly what was captured, whether or not there
-is any OCR at all.
+`npm run fixture` serves two offline pages that need no account and no book:
+`test/fixture.html` has real reader markup with synthetic pages, and
+`test/ocr-fixture.html` runs the OCR engine over known text. They are the fastest
+way for you or an agent to tell a broken change from a broken capture.
 
-**Save text PDF** drops the bitmaps and paints the recognised words themselves —
-a vector page. Each word is set in Times-Roman at the type size the recogniser
-measured for its line and placed at the position it was found at, so paragraphs,
-indents, headings, margins and page numbers keep their places and their relative
-sizes without anything having to guess at the structure of the page. Nothing is
-reflowed and no font is embedded, which is why the file comes out on the order of
-a hundredth the size and stays sharp at any zoom.
+## Build
 
-What it costs is everything that was not text: rules, ornaments and drop caps are
-not carried across, and a misread word is a misread word rather than a picture of
-the right one. It is enabled only once some page has been recognised, and a page
-OCR found nothing on is written as a blank sheet so the numbering still lines up
-with the scan. Such a page is measured from its own stored bitmap rather than from
-its neighbours: a capture size belongs to the page, not to the book — an unsplit
-spread stays landscape — and on **Match capture** borrowing the wrong one would
-turn the sheet sideways.
+Only needed if you change `src/`.
 
-### Pages kept as pictures
+```sh
+npm install
+npm run build     # typecheck, then bundle src/ to content.js, popup.js, preview.js
+npm run check     # typecheck, lint and tests
+```
 
-Plates are the exception the text export cannot set as type, so it does not try.
-Every tile in the preview grid carries an **img** box: tick it and that page is
-written into the text PDF the way the scanned export writes it — the bitmap, with
-the recognised words invisible over the top, so a caption or a label on the figure
-is still selectable and searchable. Everything around it stays vector. Only the
-flagged pages have their images read back out of storage, which is what keeps the
-export fast on a book with a handful of plates.
+`npm run watch` rebuilds on change. `npm run vendor` re-copies the OCR engine from
+`node_modules` into `vendor/tesseract`; that directory is checked in so **Load
+unpacked** works on a fresh clone, and its licenses and upstream versions are
+listed in [`vendor/tesseract/THIRD_PARTY_NOTICES.md`](vendor/tesseract/THIRD_PARTY_NOTICES.md).
 
-The box is ticked for you where it is obvious. As OCR reads a page it measures how
-much of the ink the words do not account for: on a page of prose almost every dark
-pixel is inside a word box, and what is left is a folio, a rule, a speck. On a
-plate, a map or a full-page diagram most of the ink is nowhere near a word. Above
-8% of the page, the capture is marked as one to keep. Colour counts as ink at any
-lightness, since nothing in a page of text is coloured. The same measure catches
-the case that would otherwise be worst — a page the recogniser simply failed on
-reads as ink outside boxes too, and a page that failed is exactly one to keep as a
-bitmap rather than to export as a handful of stray words.
+## Scope and limits
 
-It is measured on a 200-pixel thumbnail of the page the recogniser has already
-decoded, so it costs a downscale and no second decode. A run only ever writes the
-flag where nothing has decided it yet: once you touch the box, on or off, that is
-the answer and no later run overrules it. Pages recognised before this existed
-carry no score, so their boxes start clear and stay manual.
+What the extension has access to is a rendered page in your own browser, in a book
+your own account has already opened. It reads pixels off the screen — the same
+pixels you are looking at — and writes them to a file.
 
-Word boxes only bound the ink, so the width of the box and the width of the same
-word in Times rarely agree. Words are condensed to fit where the serif is too
-wide — boxes never overlap, so a condensed word can never run into its neighbour —
-but they are essentially never expanded to fill a box: a word spread to fill its
-box reads as letterspaced, and against a line of ordinary text letterspaced reads
-as a mistake. The slack falls into the space after the word, where a space belongs.
+It does not do any of the following, and there is no code here that could:
+
+- download, request or open a Kindle book file of any kind
+- decrypt anything, extract or derive a key, or interact with DRM at all
+- bypass a paywall, a licence check, a lending expiry or a device limit
+- give access to a book the signed-in account cannot already read
+- send a page, a book identifier or anything else anywhere; the OCR engine is
+  bundled rather than fetched, and there is no other network code
+
+So it is a screen capture tool with a page-turner and a PDF writer attached, not a
+DRM tool. That distinction is the whole design, not a disclaimer.
+
+None of that decides whether *you* may copy a particular book. Copyright in the
+text is untouched by any of this, and capturing a book you do not have the right
+to copy is on you. Automated capture may also conflict with Amazon's Conditions of
+Use regardless of copyright; that is between you and Amazon, and using this may
+put your account at risk. Nothing here is legal advice.
+
+Not affiliated with, authorized by, or endorsed by Amazon. "Amazon", "Kindle" and
+"Kindle Cloud Reader" are trademarks of Amazon.com, Inc. or its affiliates, used
+here only to say which website this software works with.
+
+## Contributing
+
+Bug fixes are welcome. New features are out of scope for this repo — if you want
+it to do something else, fork it; that is what it is for. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE) © Nikolai Andreadi.
+
+The Tesseract OCR engine and English model in `vendor/tesseract` are third-party
+code under the Apache License 2.0 and keep their own terms.

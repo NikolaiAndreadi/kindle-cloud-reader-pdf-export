@@ -1,3 +1,9 @@
+// Every assumption this extension makes about Amazon's markup lives in this
+// file: the selectors, the counter format, and where the reader renders. The
+// only ones outside it are the events in turning.ts and one attribute read in
+// capture.ts. So when a reader change breaks a scan, this is where it breaks,
+// and the cache, the PDF writer and the text layer never have to know.
+//
 // The reader paints each page as <img src="blob:…"> inside .kg-full-page-img
 // under #kr-renderer. Canvas is only in the fallback: no build observed uses
 // it, and matching every canvas is what let stray elements be stored as pages.

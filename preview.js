@@ -681,10 +681,12 @@ ${command}endstream`);
       finish() {
         object(CATALOG_ID, `<< /Type /Catalog /Pages ${PAGES_ID} 0 R >>`);
         object(PAGES_ID, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);
-        FONTS.forEach((font, i) => object(
-          FIRST_FONT_ID + i,
-          `<< /Type /Font /Subtype /Type1 /BaseFont /${font.baseFont} /Encoding /WinAnsiEncoding >>`
-        ));
+        FONTS.forEach((font, i) => {
+          object(
+            FIRST_FONT_ID + i,
+            `<< /Type /Font /Subtype /Type1 /BaseFont /${font.baseFont} /Encoding /WinAnsiEncoding >>`
+          );
+        });
         const xref = length;
         const count = nextId;
         push(`xref
