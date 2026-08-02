@@ -36,14 +36,16 @@ Licenses and exact upstream versions are listed in
 3. Click **Load unpacked** and select this directory.
 4. Open a book at <https://read.amazon.com/> (regional domains such as
    `read.amazon.co.uk` and `read.amazon.com.br` work too).
-5. Click the extension and choose **Scan / resume**.
+5. Click the extension and choose **Scan / resume**. The same button says **Stop**
+   while a scan is running.
 6. Stop whenever you like; the captured pages remain cached per book.
-7. Optionally choose **See captured pages** → **Add searchable text (OCR)** and
-   leave that tab open while it works.
-8. Pick a **PDF page size**, then choose **Save cached pages as PDF**.
+7. Choose **See captured pages and save PDF**. Everything that acts on the whole
+   book lives on that page: reordering, deleting single pages, **Add searchable
+   text (OCR)**, the **Page size** and **Save PDF** in the top right, and
+   **Clear this book**.
 
-Keep the reader tab visible until the download begins. If pages are skipped, choose
-the slower page delay.
+Keep the reader tab visible while it scans. If pages are skipped, choose the slower
+page delay.
 
 ## How it works
 

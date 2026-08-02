@@ -3,6 +3,8 @@
 // the key format and the duplicate count, so changing either one silently broke
 // the other.
 
+import { DEFAULT_PAPER, isPaperName } from '../pdf/paper.ts';
+
 export const READ_BATCH = 20;
 
 /**
@@ -35,6 +37,35 @@ export const ocrKey = (book: string, index: number, fingerprint: string): string
 
 export const ocrKeyFor = (book: string, capture: CaptureRecord): string =>
   ocrKey(book, capture.index, capture.fingerprint);
+
+/**
+ * Paper size is remembered globally rather than per book, and outside the scan
+ * options: it is chosen where the PDF is written, on the preview page, and the
+ * popup's option blob is rewritten on every slider change — the two would take
+ * turns erasing each other if they shared a key.
+ */
+const PAPER_KEY = 'paper';
+
+/** Where the popup used to keep it, back when it owned the select. */
+const LEGACY_OPTIONS_KEY = 'options';
+
+export async function loadPaper(): Promise<PaperName> {
+  const stored = await chrome.storage.local.get([PAPER_KEY, LEGACY_OPTIONS_KEY]);
+  const paper = stored[PAPER_KEY];
+  if (isPaperName(paper)) return paper;
+
+  // Nothing under the new key can mean a fresh install or an upgrade, and only
+  // the second one has an answer to give. Rewritten here rather than left to be
+  // read every time: the popup no longer writes paper into its options blob, so
+  // the next slider change would drop the old value on the floor.
+  const legacy = (stored[LEGACY_OPTIONS_KEY] as { paper?: unknown } | undefined)?.paper;
+  if (!isPaperName(legacy)) return DEFAULT_PAPER;
+  await savePaper(legacy);
+  return legacy;
+}
+
+export const savePaper = (paper: PaperName): Promise<void> =>
+  chrome.storage.local.set({ [PAPER_KEY]: paper });
 
 export const emptyMeta = (book: string): BookMeta => ({
   version: 2,

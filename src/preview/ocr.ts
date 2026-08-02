@@ -14,6 +14,9 @@ export class OcrController {
   private running = false;
   private stopRequested = false;
 
+  /** Clearing the book underneath a run would delete the pages it is reading. */
+  onBusy: (busy: boolean) => void = () => {};
+
   constructor(book: string, grid: PreviewGrid) {
     this.book = book;
     this.grid = grid;
@@ -48,6 +51,7 @@ export class OcrController {
   private async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
+    this.onBusy(true);
     this.stopRequested = false;
     ui.ocrStart.hidden = true;
     ui.ocrStop.hidden = false;
@@ -74,6 +78,7 @@ export class OcrController {
       outcome = `OCR failed: ${message(error)}`;
     } finally {
       this.running = false;
+      this.onBusy(false);
       ui.ocrStart.hidden = false;
       ui.ocrStop.hidden = true;
       try {

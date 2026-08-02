@@ -41,26 +41,20 @@
             <input type="checkbox" id="split" checked>
             Split two-page spreads
           </label>
+          <!-- Inside the block so the rules that fence it off enclose its
+               explanation too, and so hiding the note once the pair is locked
+               does not leave a rule with nothing under it. -->
+          <p id="bookNote" class="hint">Set once per book: the first scan fixes both for every page it captures.</p>
         </div>
-        <p id="bookNote" class="hint">Set once per book: the first scan fixes both for every page it captures.</p>
-        <!-- Outside #bookOptions on purpose: paper size is decided when the PDF
-             is written, so it stays editable however many pages are cached. -->
-        <label>
-          PDF page size
-          <select id="paper">
-            <option value="a4" selected>A4</option>
-            <option value="letter">US Letter</option>
-            <option value="native">Match capture</option>
-          </select>
-        </label>
         <div class="actions">
           <!-- One button for both halves of the same thing: it says what the
                next press does, and the poll flips it back to Scan / resume when
                the scan ends on its own as well as when it is stopped here. -->
           <button id="scan">Scan / resume</button>
-          <button id="save" class="secondary">Save cached pages as PDF</button>
-          <button id="preview" class="secondary" hidden>See captured pages</button>
-          <button id="clear" class="danger" title="Hold to clear">Clear this book</button>
+          <!-- Saving, page size and clearing all live on that page now: they act
+               on the whole cache, which is what it shows, and none of them
+               should be halfway through when the popup closes. -->
+          <button id="preview" class="secondary" hidden>See captured pages and save PDF</button>
         </div>
         <p id="cache" class="cache">Checking saved pages…</p>
         <p class="hint">Captured pages remain stored for this book. Reopen it later and resume without losing earlier pages.</p>

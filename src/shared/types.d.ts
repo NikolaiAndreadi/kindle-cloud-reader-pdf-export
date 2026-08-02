@@ -170,12 +170,6 @@ interface ScanOptions {
    * per book page without having to change the reader's layout.
    */
   split?: boolean;
-  /**
-   * Unlike quality and split this is not pinned by the first scan: it is applied
-   * when the export runs, so the same cache can be saved as A4 today and Letter
-   * tomorrow.
-   */
-  paper?: PaperName;
 }
 
 interface BookState {
@@ -202,9 +196,7 @@ type ReaderRequest =
   | { action: 'startScan'; options?: ScanOptions }
   | { action: 'retune'; options?: ScanOptions }
   | { action: 'stopScan' }
-  | { action: 'getState' }
-  | { action: 'saveCached'; paper?: PaperName }
-  | { action: 'clearCached' };
+  | { action: 'getState' };
 
 type ReaderAction = ReaderRequest['action'];
 
@@ -221,6 +213,4 @@ interface ReaderReplies {
   retune: ReaderMessage;
   stopScan: ReaderMessage;
   getState: BookState;
-  saveCached: ReaderMessage;
-  clearCached: ReaderMessage;
 }

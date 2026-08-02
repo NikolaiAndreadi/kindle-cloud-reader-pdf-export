@@ -1,6 +1,5 @@
-import { clearBook, countDuplicates, loadMeta, recognisedIndexes } from '../shared/storage.ts';
+import { countDuplicates, loadMeta, recognisedIndexes } from '../shared/storage.ts';
 import { acquireBookScan, releaseBookScan } from '../shared/scan-lock.ts';
-import { saveCachedPdf } from '../pdf/export.ts';
 import { bookId, pageCandidates, readerPosition } from './dom.ts';
 import { notify, removeNoticeLater } from './notice.ts';
 import { isRunning, requestStop, retune, scan } from './scan.ts';
@@ -29,15 +28,6 @@ async function bookState(book: string): Promise<BookState> {
     split: meta.split,
     quality: meta.quality
   };
-}
-
-async function clearCached(book: string): Promise<ReaderMessage> {
-  if (isRunning()) return { message: 'Stop the scan before clearing this book.' };
-  const cleared = await clearBook(book);
-  const message = `Cleared ${cleared} saved pages.`;
-  notify(message);
-  removeNoticeLater();
-  return { message };
 }
 
 /**
@@ -101,14 +91,6 @@ chrome.runtime.onMessage.addListener((
 
     case 'getState':
       bookState(book).then(sendResponse, (error: Error) => sendResponse({ error: error.message }));
-      return true;
-
-    case 'saveCached':
-      saveCachedPdf(book, request.paper).then(sendResponse, (error: Error) => sendResponse({ error: `Save failed: ${error.message}` }));
-      return true;
-
-    case 'clearCached':
-      clearCached(book).then(sendResponse, (error: Error) => sendResponse({ error: `Clear failed: ${error.message}` }));
       return true;
 
     default:

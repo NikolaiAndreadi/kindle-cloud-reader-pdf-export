@@ -15,7 +15,11 @@ export const ui = {
   viewerImage: required<HTMLImageElement>('viewer-image'),
   ocrStart: required<HTMLButtonElement>('ocrStart'),
   ocrStop: required<HTMLButtonElement>('ocrStop'),
-  ocrStatus: required('ocrStatus')
+  ocrStatus: required('ocrStatus'),
+  paper: required<HTMLSelectElement>('paper'),
+  save: required<HTMLButtonElement>('save'),
+  saveStatus: required('saveStatus'),
+  clear: required<HTMLButtonElement>('clear')
 };
 
 export const plural = (n: number, word: string): string =>

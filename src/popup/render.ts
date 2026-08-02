@@ -110,8 +110,6 @@ export function apply(state: BookState | null, onReader: boolean, problem?: stri
   lockBookOptions(state);
   ui.preview.hidden = !state?.count;
   scanButton(state?.scanning === true, ready);
-  ui.save.disabled = !state?.count;
-  ui.clear.disabled = !state?.count || state.scanning;
 
   if (!state) {
     if (!spoken) ui.status.textContent = problem || 'Open read.amazon.com to begin.';

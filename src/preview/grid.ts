@@ -18,6 +18,8 @@ interface Tile {
   mark: HTMLSpanElement;
   remove: HTMLButtonElement;
   fingerprint: string;
+  /** "2408×1448", or null for a capture missing from storage. */
+  size: string | null;
 }
 
 export class PreviewGrid {
@@ -106,6 +108,23 @@ export class PreviewGrid {
   }
 
   /**
+   * The size every page of this book was captured at. A scan pins the reader's
+   * layout, so this is one number for the whole book — but a cache can still
+   * hold two, from a spread captured before splitting was turned on or a window
+   * resized between two runs, and that is worth saying because it decides how
+   * the pages sit on the paper. Empty until the first page has loaded.
+   */
+  private capturedSize(): string | null {
+    const sizes = new Set<string>();
+    for (const tile of this.tiles.values()) {
+      if (tile.size) sizes.add(tile.size);
+    }
+    if (sizes.size > 1) return `${sizes.size} capture sizes`;
+    for (const size of sizes) return size;
+    return null;
+  }
+
+  /**
    * Redraw everything that depends on the set of captures rather than on one
    * page: the summary line and the repeat markers, both of which change when a
    * page is deleted.
@@ -126,6 +145,10 @@ export class PreviewGrid {
     // anything injected here would run with extension privileges.
     ui.summary.replaceChildren(span(plural(this.records.length, 'page')));
     if (this.total) ui.summary.append(span(` of about ${this.total}`));
+
+    const size = this.capturedSize();
+    if (size) ui.summary.append(span(` · ${size}`));
+
     if (duplicates) {
       ui.summary.append(span(' · '), span(plural(duplicates, 'duplicate'), 'warn'));
     }
@@ -231,7 +254,9 @@ export class PreviewGrid {
       image.draggable = false;
       image.addEventListener('click', () => this.openViewer(page.dataUrl, text));
       figure.append(image);
-      caption.append(label, span(`${page.width}×${page.height}`));
+      // The pixel size is not per page — one book is captured at one size — so
+      // it is reported once in the header rather than under every tile.
+      caption.append(label);
     } else {
       figure.classList.add('gone');
       label.textContent = `${text} — missing from storage`;
@@ -243,7 +268,9 @@ export class PreviewGrid {
     caption.append(mark, remove);
     figure.append(caption);
     this.tiles.set(capture.index, {
-      figure, label, text, mark, remove, fingerprint: capture.fingerprint
+      figure, label, text, mark, remove,
+      fingerprint: capture.fingerprint,
+      size: page?.width && page.height ? `${page.width}×${page.height}` : null
     });
     return figure;
   }

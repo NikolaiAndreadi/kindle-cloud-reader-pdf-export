@@ -20,14 +20,36 @@
       }
       .lock[hidden] { display: none; }
       .ocr { flex-basis: 100%; display: flex; gap: 10px; align-items: center; font-size: 13px; }
-      .ocr button {
+      button {
         font: inherit; padding: 4px 10px; border-radius: 4px; cursor: pointer;
         color: inherit; background: Canvas;
         border: 1px solid color-mix(in srgb, CanvasText 35%, transparent);
       }
-      .ocr button:disabled { opacity: .45; cursor: default; }
-      .ocr button[hidden] { display: none; }
+      button:disabled { opacity: .45; cursor: default; }
+      button[hidden] { display: none; }
       #ocrStatus { opacity: .8; }
+      /* Saving is what this page is for once the pages are in order, so it sits
+         at the end of the header rather than in the flow of the grid: the header
+         is sticky, so it stays reachable however far down the book you are. */
+      .save {
+        margin-left: auto; display: flex; gap: 10px; align-items: center; font-size: 13px;
+        /* The header aligns its row on the h1's baseline, which a box of
+           controls does not have a sensible one of. */
+        align-self: center;
+      }
+      .save select { font: inherit; padding: 3px 4px; }
+      .save label { display: flex; gap: 6px; align-items: center; opacity: .8; }
+      #save { font-weight: 600; }
+      #saveStatus { opacity: .8; }
+      /* The one irreversible thing on the page, so it is kept away from Save and
+         held rather than clicked — the bar fills over --hold-ms as it is held,
+         and letting go early is the cancel. */
+      #clear {
+        margin-left: auto; user-select: none; color: #b3261e; border-color: #b3261e;
+        background-image: linear-gradient(#b3261e33, #b3261e33);
+        background-repeat: no-repeat; background-size: 0 100%;
+      }
+      #clear.holding { background-size: 100% 100%; transition: background-size var(--hold-ms, 2000ms) linear; }
       /* Marks the pages that already carry a text layer, so a part-finished run
          is visible on the grid rather than only in the counter. */
       figcaption .text { flex: none; opacity: .75; }
@@ -67,11 +89,24 @@
     <header>
       <h1 id="title">Captured pages</h1>
       <span class="meta" id="summary">Loading…</span>
+      <div class="save">
+        <span id="saveStatus"></span>
+        <label>
+          Page size
+          <select id="paper">
+            <option value="a4" selected>A4</option>
+            <option value="letter">US Letter</option>
+            <option value="native">Match capture</option>
+          </select>
+        </label>
+        <button id="save" type="button">Save PDF</button>
+      </div>
       <span class="lock" id="lock" hidden></span>
       <div class="ocr">
         <button id="ocrStart" type="button">Add searchable text (OCR)</button>
         <button id="ocrStop" type="button" hidden>Stop</button>
         <span id="ocrStatus"></span>
+        <button id="clear" type="button">Hold to clear the book</button>
       </div>
     </header>
     <main id="grid"></main>

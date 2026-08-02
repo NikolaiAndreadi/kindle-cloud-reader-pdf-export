@@ -1,5 +1,6 @@
 import { scanRunning } from '../shared/scanning.ts';
 import { loadMeta, pagesInBatches } from '../shared/storage.ts';
+import { BookActions } from './actions.ts';
 import { message, ui } from './elements.ts';
 import { PreviewGrid } from './grid.ts';
 import { OcrController } from './ocr.ts';
@@ -13,8 +14,13 @@ const WATCH_MS = 2000;
 const book = new URLSearchParams(location.search).get('book') || '';
 const grid = new PreviewGrid(book);
 const ocr = new OcrController(book, grid);
+const actions = new BookActions(book, grid);
 
-grid.onChange = () => ocr.describe();
+grid.onChange = () => {
+  ocr.describe();
+  actions.describe();
+};
+ocr.onBusy = (busy) => actions.setOcrBusy(busy);
 
 /**
  * Which load() call owns the grid. A scan finishing reloads the page contents
@@ -61,6 +67,9 @@ async function reload(): Promise<void> {
 async function watchScan(): Promise<void> {
   const wasLocked = grid.locked;
   grid.setLocked(await scanRunning(book));
+  // setLocked only reaches the grid's own controls; clearing is disabled by the
+  // same lock and is not one of them.
+  actions.describe();
   // A scan that has just finished leaves this grid short of everything it
   // captured, so pick the pages up rather than showing a stale count.
   if (wasLocked && !grid.locked) await reload();

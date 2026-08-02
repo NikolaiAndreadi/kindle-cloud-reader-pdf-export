@@ -3,8 +3,8 @@ import { beforeEach, describe, it } from 'node:test';
 
 import {
   clearBook, countDuplicates, deleteCapture, emptyMeta, fingerprintCounts, loadMeta, loadOcrBatch,
-  metaKey, nextIndex, ocrKey, ocrKeyParts, pageKey, pagesInBatches, recognisedIndexes,
-  reorderCaptures, saveMeta, storeOcr, storePage
+  loadPaper, metaKey, nextIndex, ocrKey, ocrKeyParts, pageKey, pagesInBatches, recognisedIndexes,
+  reorderCaptures, saveMeta, savePaper, storeOcr, storePage
 } from '../../src/shared/storage.ts';
 
 /** Just enough of chrome.storage.local to exercise the module. */
@@ -385,5 +385,45 @@ describe('clearBook', () => {
     assert.equal(data.has(metaKey('B001')), false);
     assert.equal(await clearBook('B001'), 1);
     assert.equal(data.has(pageKey('B001', 1)), false);
+  });
+});
+
+describe('paper size', () => {
+  it('defaults to A4 with nothing stored', async () => {
+    assert.equal(await loadPaper(), 'a4');
+  });
+
+  it('reads back what was saved', async () => {
+    await savePaper('letter');
+    assert.equal(await loadPaper(), 'letter');
+  });
+
+  it('ignores a size no writer knows', async () => {
+    data.set('paper', 'foolscap');
+    assert.equal(await loadPaper(), 'a4');
+  });
+
+  /**
+   * The select used to live in the popup, which kept it inside the scan
+   * options. That blob is rewritten on every slider change and no longer
+   * carries a paper size, so the old choice has to be moved rather than read
+   * where it lies.
+   */
+  it('takes the choice a previous version left in the scan options', async () => {
+    data.set('options', { delay: 1100, jitter: 2, paper: 'native' });
+    assert.equal(await loadPaper(), 'native');
+    assert.equal(data.get('paper'), 'native');
+  });
+
+  it('prefers its own key over the one it migrated from', async () => {
+    data.set('options', { paper: 'native' });
+    await savePaper('letter');
+    assert.equal(await loadPaper(), 'letter');
+  });
+
+  it('falls back to A4 when the old options carry no size', async () => {
+    data.set('options', { delay: 1100 });
+    assert.equal(await loadPaper(), 'a4');
+    assert.equal(data.has('paper'), false);
   });
 });

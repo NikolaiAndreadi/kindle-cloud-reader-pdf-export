@@ -1,10 +1,5 @@
 "use strict";
 (() => {
-  // src/pdf/paper.ts
-  var PAPER_NAMES = ["a4", "letter", "native"];
-  var DEFAULT_PAPER = "a4";
-  var isPaperName = (value) => typeof value === "string" && PAPER_NAMES.includes(value);
-
   // src/shared/reader-hosts.ts
   var READER_HOSTS = [
     "read.amazon.com",
@@ -71,14 +66,11 @@
     jitter: required("#jitter"),
     jitterValue: required("#jitterValue"),
     quality: required("#quality"),
-    paper: required("#paper"),
     split: required("#split"),
     bookOptions: required("#bookOptions"),
     bookNote: required("#bookNote"),
     open: required("#open"),
     scan: required("#scan"),
-    save: required("#save"),
-    clear: required("#clear"),
     preview: required("#preview")
   };
 
@@ -135,8 +127,6 @@
     lockBookOptions(state);
     ui.preview.hidden = !state?.count;
     scanButton(state?.scanning === true, ready);
-    ui.save.disabled = !state?.count;
-    ui.clear.disabled = !state?.count || state.scanning;
     if (!state) {
       if (!spoken) ui.status.textContent = problem || "Open read.amazon.com to begin.";
       ui.cache.textContent = "";
@@ -148,16 +138,13 @@
 
   // src/popup/main.ts
   var POLL_MS = 1e3;
-  var HOLD_MS = 2e3;
   var currentBook = null;
   var scanning = false;
-  var paperChoice = () => isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
   var uiOptions = () => ({
     delay: Number(ui.delay.value),
     jitter: Number(ui.jitter.value),
     quality: Number(ui.quality.value),
-    split: ui.split.checked,
-    paper: paperChoice()
+    split: ui.split.checked
   });
   async function activeTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -205,37 +192,6 @@
   function onClick(button, run) {
     button.addEventListener("click", () => void perform(run));
   }
-  function holdToClear(button, run) {
-    button.style.setProperty("--hold-ms", `${HOLD_MS}ms`);
-    let timer;
-    const reset = () => {
-      if (timer !== void 0) clearTimeout(timer);
-      timer = void 0;
-      button.classList.remove("holding");
-    };
-    const start = () => {
-      if (timer !== void 0 || button.disabled) return;
-      button.classList.add("holding");
-      timer = setTimeout(() => {
-        reset();
-        if (!button.disabled) void perform(run);
-      }, HOLD_MS);
-    };
-    const cancel = () => {
-      if (timer === void 0) return;
-      reset();
-      notice("Hold the button to clear this book.");
-    };
-    button.addEventListener("pointerdown", start);
-    for (const event of ["pointerup", "pointerleave", "pointercancel"]) {
-      button.addEventListener(event, cancel);
-    }
-    addEventListener("blur", cancel);
-    button.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") start();
-    });
-    button.addEventListener("keyup", cancel);
-  }
   onClick(ui.open, async () => {
     const tabs = await chrome.tabs.query({});
     const reader = tabs.find((tab) => isReaderUrl(tab.url));
@@ -263,11 +219,6 @@
     const result = await send("startScan", { options });
     return result.message || "Scan started. You may close this popup.";
   });
-  onClick(ui.save, async () => {
-    notice("Building PDF in the reader tab…");
-    return (await send("saveCached", { paper: paperChoice() })).message;
-  });
-  holdToClear(ui.clear, async () => (await send("clearCached")).message);
   async function remember(pacing) {
     const options = uiOptions();
     await chrome.storage.local.set({ options });
@@ -277,7 +228,7 @@
     } catch {
     }
   }
-  for (const control of [ui.quality, ui.split, ui.paper]) {
+  for (const control of [ui.quality, ui.split]) {
     control.addEventListener("change", () => void remember(false));
   }
   for (const slider of [ui.delay, ui.jitter]) {
@@ -291,7 +242,6 @@
       if (options.jitter !== void 0) ui.jitter.value = String(clampJitter(options.jitter));
       if (options.quality && !ui.quality.disabled) ui.quality.value = String(options.quality);
       if (options.split !== void 0 && !ui.split.disabled) ui.split.checked = options.split;
-      if (isPaperName(options.paper)) ui.paper.value = options.paper;
       showTiming();
     }
   });

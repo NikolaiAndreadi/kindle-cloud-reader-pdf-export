@@ -85,14 +85,15 @@ async function verifyVendored() {
 }
 
 /**
- * popup.html offers the paper sizes by name and the PDF writer implements them
- * by name, with nothing to connect the two. An option no writer knows falls back
- * to A4 silently, which looks like the setting being ignored.
+ * preview.html offers the paper sizes by name, beside the button that writes the
+ * PDF, and the writer implements them by name with nothing to connect the two.
+ * An option no writer knows falls back to A4 silently, which looks like the
+ * setting being ignored.
  */
 async function verifyPaperSizes() {
-  const html = await readFile(resolve(root, 'popup.html'), 'utf8');
+  const html = await readFile(resolve(root, 'preview.html'), 'utf8');
   const select = html.match(/<select[^>]*id="paper"[^>]*>([\s\S]*?)<\/select>/)?.[1];
-  if (!select) throw new Error('popup.html has no <select id="paper">');
+  if (!select) throw new Error('preview.html has no <select id="paper">');
   const offered = [...select.matchAll(/value="([^"]*)"/g)].map((match) => match[1]);
   const unknown = offered.filter((name) => !PAPER_NAMES.includes(name));
   const absent = PAPER_NAMES.filter((name) => !offered.includes(name));

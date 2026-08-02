@@ -1,4 +1,3 @@
-import { DEFAULT_PAPER, isPaperName } from '../pdf/paper.ts';
 import { READER_HOME, isReaderUrl } from '../shared/reader-hosts.ts';
 import { clampDelay, clampJitter } from '../shared/timing.ts';
 import { ui } from './elements.ts';
@@ -7,7 +6,6 @@ import { apply, notice, showTiming } from './render.ts';
 // A scan runs in the reader tab and the popup is a window onto it, so the
 // numbers have to arrive on their own rather than when a button is clicked.
 const POLL_MS = 1000;
-const HOLD_MS = 2000;
 
 let currentBook: string | null = null;
 // What the one scan button will do when pressed. Kept here rather than read off
@@ -15,14 +13,11 @@ let currentBook: string | null = null;
 // meant, and refreshed on every poll so a scan that ended by itself is noticed.
 let scanning = false;
 
-const paperChoice = (): PaperName => isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
-
 const uiOptions = (): ScanOptions => ({
   delay: Number(ui.delay.value),
   jitter: Number(ui.jitter.value),
   quality: Number(ui.quality.value),
-  split: ui.split.checked,
-  paper: paperChoice()
+  split: ui.split.checked
 });
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
@@ -92,58 +87,6 @@ function onClick(button: HTMLButtonElement, run: () => Promise<string | null>): 
   button.addEventListener('click', () => void perform(run));
 }
 
-/**
- * Clearing is the only irreversible thing here, so it is held rather than
- * clicked: a confirm() dialog is dismissed by reflex, and it asks the question
- * somewhere other than where the action was taken. The button fills as it is
- * held so the wait reads as progress rather than a dead press, and letting go
- * early is the cancel.
- */
-function holdToClear(button: HTMLButtonElement, run: () => Promise<string | null>): void {
-  // The bar's CSS transition reads this back, so the duration is set once here.
-  button.style.setProperty('--hold-ms', `${HOLD_MS}ms`);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const reset = (): void => {
-    if (timer !== undefined) clearTimeout(timer);
-    timer = undefined;
-    // Dropping the class leaves no transition on the way back, so the bar
-    // empties at once and a cancelled hold never looks like a partial one.
-    button.classList.remove('holding');
-  };
-
-  const start = (): void => {
-    if (timer !== undefined || button.disabled) return;
-    button.classList.add('holding');
-    timer = setTimeout(() => {
-      reset();
-      // A poll may have disabled the button mid-hold, e.g. a scan just started
-      // in the reader tab. Whatever the state says now wins.
-      if (!button.disabled) void perform(run);
-    }, HOLD_MS);
-  };
-
-  const cancel = (): void => {
-    if (timer === undefined) return;
-    reset();
-    notice('Hold the button to clear this book.');
-  };
-
-  button.addEventListener('pointerdown', start);
-  // Sliding off the button is the other half of how people back out of a hold.
-  for (const event of ['pointerup', 'pointerleave', 'pointercancel']) {
-    button.addEventListener(event, cancel);
-  }
-  // Nothing would end the hold if the popup lost focus mid-press.
-  addEventListener('blur', cancel);
-
-  // A button that only responds to pointers cannot be reached by keyboard.
-  button.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') start();
-  });
-  button.addEventListener('keyup', cancel);
-}
-
 // Prefer an existing reader tab over stacking up duplicates. Querying every tab
 // is fine without the "tabs" permission: url is only populated for tabs the
 // extension already has host access to, which is exactly the reader tabs.
@@ -181,13 +124,6 @@ onClick(ui.scan, async () => {
   return result.message || 'Scan started. You may close this popup.';
 });
 
-onClick(ui.save, async () => {
-  notice('Building PDF in the reader tab…');
-  return (await send('saveCached', { paper: paperChoice() })).message;
-});
-
-holdToClear(ui.clear, async () => (await send('clearCached')).message);
-
 /**
  * Every control writes through on change, so the popup reopens with what was
  * left set rather than the markup defaults. The pacing pair is also pushed to a
@@ -206,7 +142,7 @@ async function remember(pacing: boolean): Promise<void> {
   }
 }
 
-for (const control of [ui.quality, ui.split, ui.paper]) {
+for (const control of [ui.quality, ui.split]) {
   control.addEventListener('change', () => void remember(false));
 }
 
@@ -231,7 +167,6 @@ chrome.storage.local.get('options').then(({ options }: { options?: ScanOptions }
     // arrives second would otherwise win, and the cache is the authority.
     if (options.quality && !ui.quality.disabled) ui.quality.value = String(options.quality);
     if (options.split !== undefined && !ui.split.disabled) ui.split.checked = options.split;
-    if (isPaperName(options.paper)) ui.paper.value = options.paper;
     showTiming();
   }
 });

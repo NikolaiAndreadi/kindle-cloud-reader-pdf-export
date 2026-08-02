@@ -55,12 +55,64 @@
     return states.some((state) => state?.scanning && state.bookId === book2);
   }
 
+  // src/pdf/paper.ts
+  var NATIVE_POINTS_WIDE = 612;
+  var PAPER_SIZES = {
+    a4: { width: 595.28, height: 841.89 },
+    letter: { width: 612, height: 792 }
+  };
+  var PAPER_NAMES = ["a4", "letter", "native"];
+  var DEFAULT_PAPER = "a4";
+  var isPaperName = (value) => typeof value === "string" && PAPER_NAMES.includes(value);
+  var paperLabel = (paper) => paper === "a4" ? "A4" : paper === "letter" ? "US Letter" : "capture size";
+  function layoutFor(imageWidth, imageHeight, paper) {
+    if (!(imageWidth > 0) || !(imageHeight > 0)) return null;
+    if (paper === "native") {
+      const height2 = NATIVE_POINTS_WIDE * imageHeight / imageWidth;
+      return {
+        pageWidth: NATIVE_POINTS_WIDE,
+        pageHeight: height2,
+        x: 0,
+        y: 0,
+        width: NATIVE_POINTS_WIDE,
+        height: height2
+      };
+    }
+    const size = PAPER_SIZES[paper];
+    const landscape = imageWidth > imageHeight;
+    const pageWidth = landscape ? size.height : size.width;
+    const pageHeight = landscape ? size.width : size.height;
+    const scale = Math.min(pageWidth / imageWidth, pageHeight / imageHeight);
+    const width = imageWidth * scale;
+    const height = imageHeight * scale;
+    return {
+      pageWidth,
+      pageHeight,
+      x: (pageWidth - width) / 2,
+      y: (pageHeight - height) / 2,
+      width,
+      height
+    };
+  }
+
   // src/shared/storage.ts
   var READ_BATCH = 20;
   var metaKey = (book2) => `book:${book2}:meta`;
   var pageKey = (book2, index) => `book:${book2}:page:${String(index).padStart(6, "0")}`;
   var ocrKey = (book2, index, fingerprint) => `book:${book2}:ocr:${String(index).padStart(6, "0")}:${fingerprint}`;
   var ocrKeyFor = (book2, capture) => ocrKey(book2, capture.index, capture.fingerprint);
+  var PAPER_KEY = "paper";
+  var LEGACY_OPTIONS_KEY = "options";
+  async function loadPaper() {
+    const stored = await chrome.storage.local.get([PAPER_KEY, LEGACY_OPTIONS_KEY]);
+    const paper = stored[PAPER_KEY];
+    if (isPaperName(paper)) return paper;
+    const legacy = stored[LEGACY_OPTIONS_KEY]?.paper;
+    if (!isPaperName(legacy)) return DEFAULT_PAPER;
+    await savePaper(legacy);
+    return legacy;
+  }
+  var savePaper = (paper) => chrome.storage.local.set({ [PAPER_KEY]: paper });
   var emptyMeta = (book2) => ({
     version: 2,
     bookId: book2,
@@ -156,12 +208,365 @@
     await local.remove([pageKey(book2, index), ...stale]);
     return meta;
   }
+  async function clearBook(book2) {
+    const local = chrome.storage.local;
+    const allKeys = typeof local.getKeys === "function" ? await local.getKeys() : Object.keys(await local.get(null));
+    const pagePrefix = `book:${book2}:page:`;
+    const ocrPrefix = `book:${book2}:ocr:`;
+    const pages = allKeys.filter((key) => key.startsWith(pagePrefix));
+    const ocr2 = allKeys.filter((key) => key.startsWith(ocrPrefix));
+    await local.remove([metaKey(book2), ...pages, ...ocr2]);
+    return pages.length;
+  }
   function fingerprintCounts(captures) {
     const counts = /* @__PURE__ */ new Map();
     for (const capture of captures) {
       if (capture.fingerprint) counts.set(capture.fingerprint, (counts.get(capture.fingerprint) || 0) + 1);
     }
     return counts;
+  }
+
+  // src/pdf/text.ts
+  var INVISIBLE = 3;
+  var MIN_SIDE = 0.5;
+  var MIN_STRETCH = 10;
+  var MAX_STRETCH = 1e3;
+  var WIDTHS = [
+    278,
+    278,
+    355,
+    556,
+    556,
+    889,
+    667,
+    191,
+    333,
+    333,
+    389,
+    584,
+    278,
+    333,
+    278,
+    278,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    278,
+    278,
+    584,
+    584,
+    584,
+    556,
+    1015,
+    667,
+    667,
+    722,
+    722,
+    667,
+    611,
+    778,
+    722,
+    278,
+    500,
+    667,
+    556,
+    833,
+    722,
+    778,
+    667,
+    778,
+    722,
+    667,
+    611,
+    722,
+    667,
+    944,
+    667,
+    667,
+    611,
+    278,
+    278,
+    278,
+    469,
+    556,
+    333,
+    556,
+    556,
+    500,
+    556,
+    556,
+    278,
+    556,
+    556,
+    222,
+    222,
+    500,
+    222,
+    833,
+    556,
+    556,
+    556,
+    556,
+    333,
+    500,
+    278,
+    556,
+    500,
+    722,
+    500,
+    500,
+    500,
+    334,
+    260,
+    334,
+    584
+  ];
+  var FALLBACK_WIDTH = 556;
+  var WIN_ANSI_HIGH = /* @__PURE__ */ new Map([
+    [8364, 128],
+    [8218, 130],
+    [402, 131],
+    [8222, 132],
+    [8230, 133],
+    [8224, 134],
+    [8225, 135],
+    [710, 136],
+    [8240, 137],
+    [352, 138],
+    [8249, 139],
+    [338, 140],
+    [381, 142],
+    [8216, 145],
+    [8217, 146],
+    [8220, 147],
+    [8221, 148],
+    [8226, 149],
+    [8211, 150],
+    [8212, 151],
+    [732, 152],
+    [8482, 153],
+    [353, 154],
+    [8250, 155],
+    [339, 156],
+    [382, 158],
+    [376, 159]
+  ]);
+  function winAnsi(text) {
+    let out = "";
+    for (const character of text) {
+      const code = character.codePointAt(0);
+      if (code >= 32 && code <= 255) out += String.fromCharCode(code);
+      else {
+        const mapped = WIN_ANSI_HIGH.get(code);
+        if (mapped !== void 0) out += String.fromCharCode(mapped);
+      }
+    }
+    return out;
+  }
+  function pdfString(winAnsiText) {
+    let out = "(";
+    for (let i = 0; i < winAnsiText.length; i++) {
+      const code = winAnsiText.charCodeAt(i);
+      if (code === 40 || code === 41 || code === 92) out += `\\${winAnsiText[i]}`;
+      else if (code > 126) out += `\\${code.toString(8).padStart(3, "0")}`;
+      else out += winAnsiText[i];
+    }
+    return `${out})`;
+  }
+  function textWidth(winAnsiText) {
+    let total = 0;
+    for (let i = 0; i < winAnsiText.length; i++) {
+      const code = winAnsiText.charCodeAt(i);
+      total += code >= 32 && code <= 126 ? WIDTHS[code - 32] : FALLBACK_WIDTH;
+    }
+    return total / 1e3;
+  }
+  function textLayerOps(words, place) {
+    const { scale, left, bottom, imageHeight } = place;
+    let out = `BT
+${INVISIBLE} Tr
+`;
+    let used = 0;
+    for (const word of words) {
+      const text = winAnsi(word.t);
+      if (!text.trim()) continue;
+      const boxWidth = (word.x1 - word.x0) * scale;
+      const size = ((word.s ?? word.y1 - word.y0) || 0) * scale;
+      if (boxWidth < MIN_SIDE || size < MIN_SIDE) continue;
+      const natural = textWidth(text) * size;
+      if (natural <= 0) continue;
+      const stretch = Math.min(MAX_STRETCH, Math.max(MIN_STRETCH, 100 * boxWidth / natural));
+      const x = left + word.x0 * scale;
+      const y = bottom + (imageHeight - (word.b ?? word.y1)) * scale;
+      out += `/F1 ${size.toFixed(2)} Tf ${stretch.toFixed(2)} Tz `;
+      out += `1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm ${pdfString(text)} Tj
+`;
+      used += 1;
+    }
+    return used ? `${out}ET
+` : "";
+  }
+
+  // src/pdf/builder.ts
+  var CATALOG_ID = 1;
+  var PAGES_ID = 2;
+  var FONT_ID = 3;
+  var FIRST_PAGE_ID = 4;
+  var IDS_PER_PAGE = 3;
+  var encoder = new TextEncoder();
+  var pt = (value) => value.toFixed(2);
+  function bytesFromDataUrl(dataUrl) {
+    const comma = dataUrl.indexOf(",");
+    if (comma < 0) return null;
+    const binary = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+  function pdfBuilder(options = {}) {
+    const paper = options.paper ?? DEFAULT_PAPER;
+    const parts = [];
+    const offsets = [];
+    const pageIds = [];
+    let pending = [];
+    let length = 0;
+    let withText = 0;
+    const push = (value) => {
+      const bytes = typeof value === "string" ? encoder.encode(value) : value;
+      pending.push(bytes);
+      length += bytes.length;
+    };
+    const object = (id, body) => {
+      offsets[id] = length;
+      push(`${id} 0 obj
+`);
+      push(body);
+      push("\nendobj\n");
+    };
+    const flush = () => {
+      if (!pending.length) return;
+      parts.push(new Blob(pending));
+      pending = [];
+    };
+    push(new Uint8Array([37, 80, 68, 70, 45, 49, 46, 52, 10]));
+    push(new Uint8Array([37, 226, 227, 207, 211, 10]));
+    return {
+      get pages() {
+        return pageIds.length;
+      },
+      get textPages() {
+        return withText;
+      },
+      flush,
+      addImage(image, words) {
+        const layout = layoutFor(image.width, image.height, paper);
+        if (!layout) return;
+        const index = pageIds.length;
+        const pageId = FIRST_PAGE_ID + index * IDS_PER_PAGE;
+        const imageId = pageId + 1;
+        const contentId = pageId + 2;
+        pageIds.push(pageId);
+        object(pageId, `<< /Type /Page /Parent ${PAGES_ID} 0 R /MediaBox [0 0 ${pt(layout.pageWidth)} ${pt(layout.pageHeight)}] /Resources << /XObject << /Im${index} ${imageId} 0 R >> /Font << /F1 ${FONT_ID} 0 R >> >> /Contents ${contentId} 0 R >>`);
+        offsets[imageId] = length;
+        push(`${imageId} 0 obj
+<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.bytes.length} >>
+stream
+`);
+        push(image.bytes);
+        push("\nendstream\nendobj\n");
+        let command = `q
+${pt(layout.width)} 0 0 ${pt(layout.height)} ${pt(layout.x)} ${pt(layout.y)} cm
+/Im${index} Do
+Q
+`;
+        const text = words?.length ? textLayerOps(words, {
+          scale: layout.width / image.width,
+          left: layout.x,
+          bottom: layout.y,
+          imageHeight: image.height
+        }) : "";
+        if (text) {
+          command += text;
+          withText += 1;
+        }
+        object(contentId, `<< /Length ${command.length} >>
+stream
+${command}endstream`);
+      },
+      finish() {
+        object(CATALOG_ID, `<< /Type /Catalog /Pages ${PAGES_ID} 0 R >>`);
+        object(PAGES_ID, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);
+        object(FONT_ID, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+        const xref = length;
+        const count = FIRST_PAGE_ID + pageIds.length * IDS_PER_PAGE;
+        push(`xref
+0 ${count}
+0000000000 65535 f 
+`);
+        for (let id = 1; id < count; id++) push(`${String(offsets[id] ?? 0).padStart(10, "0")} 00000 n 
+`);
+        push(`trailer
+<< /Size ${count} /Root ${CATALOG_ID} 0 R >>
+startxref
+${xref}
+%%EOF`);
+        flush();
+        return new Blob(parts, { type: "application/pdf" });
+      }
+    };
+  }
+
+  // src/pdf/export.ts
+  var REVOKE_AFTER_MS = 6e4;
+  var plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  function download(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
+  }
+  async function saveCachedPdf(book2, paper, report) {
+    const meta = await loadMeta(book2);
+    if (!meta.captures.length) return { message: "No saved pages for this book." };
+    report(`Loading ${plural(meta.captures.length, "cached page")}…`);
+    const builder = pdfBuilder({ paper });
+    let unreadable = 0;
+    for await (const batch of pagesInBatches(book2, meta.captures)) {
+      const ocr2 = await loadOcrBatch(book2, batch.map(({ capture }) => capture));
+      for (const { capture, page } of batch) {
+        const bytes = page?.dataUrl ? bytesFromDataUrl(page.dataUrl) : null;
+        if (!bytes || !page?.width || !page.height) {
+          unreadable += 1;
+          continue;
+        }
+        const words = ocr2.get(capture.index);
+        const usable = words && words.width === page.width && words.height === page.height;
+        builder.addImage(
+          { width: page.width, height: page.height, bytes },
+          usable ? words.words : void 0
+        );
+      }
+      builder.flush();
+      report(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);
+    }
+    if (!builder.pages) {
+      return { message: "Saved pages could not be read back from storage." };
+    }
+    const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    download(builder.finish(), `kindle-${book2}-${date}.pdf`);
+    const notes = [`${paperLabel(paper)} pages`];
+    if (builder.textPages) notes.push(`${builder.textPages} with searchable text`);
+    if (unreadable) notes.push(`${plural(unreadable, "page")} could not be read`);
+    return { message: `Saved ${builder.pages} pages as PDF · ${notes.join(" · ")}.` };
   }
 
   // src/preview/elements.ts
@@ -179,9 +584,13 @@
     viewerImage: required("viewer-image"),
     ocrStart: required("ocrStart"),
     ocrStop: required("ocrStop"),
-    ocrStatus: required("ocrStatus")
+    ocrStatus: required("ocrStatus"),
+    paper: required("paper"),
+    save: required("save"),
+    saveStatus: required("saveStatus"),
+    clear: required("clear")
   };
-  var plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  var plural2 = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   var message = (error) => error instanceof Error ? error.message : String(error);
   function span(text, className) {
     const node = document.createElement("span");
@@ -189,6 +598,111 @@
     if (className) node.className = className;
     return node;
   }
+
+  // src/preview/actions.ts
+  var HOLD_MS = 2e3;
+  var BookActions = class {
+    book;
+    grid;
+    saving = false;
+    ocrBusy = false;
+    constructor(book2, grid2) {
+      this.book = book2;
+      this.grid = grid2;
+      ui.save.addEventListener("click", () => void this.save());
+      this.bindHold();
+      void loadPaper().then((paper) => {
+        ui.paper.value = paper;
+      });
+      ui.paper.addEventListener("change", () => {
+        if (isPaperName(ui.paper.value)) void savePaper(ui.paper.value);
+      });
+      addEventListener("beforeunload", (event) => {
+        if (this.saving) event.preventDefault();
+      });
+      this.describe();
+    }
+    /** Told by the OCR controller, which owns the other long job on this page. */
+    setOcrBusy(busy) {
+      this.ocrBusy = busy;
+      this.describe();
+    }
+    /**
+     * Called on every grid change as well as at the ends of both long jobs, so the
+     * two buttons always agree with what there is to act on. Clearing is held to a
+     * stricter rule than saving: reading the cache while a scan appends to it is
+     * merely incomplete, while deleting it underneath a scan or an OCR run breaks
+     * the job that is running.
+     */
+    describe() {
+      const empty = !this.grid.captures.length;
+      ui.save.disabled = empty || this.saving;
+      ui.clear.disabled = empty || this.saving || this.ocrBusy || this.grid.locked;
+    }
+    async save() {
+      if (this.saving) return;
+      this.saving = true;
+      this.describe();
+      try {
+        const paper = isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
+        const result = await saveCachedPdf(this.book, paper, (text) => {
+          ui.saveStatus.textContent = text;
+        });
+        ui.saveStatus.textContent = result.message;
+      } catch (error) {
+        ui.saveStatus.textContent = `Save failed: ${message(error)}`;
+      } finally {
+        this.saving = false;
+        this.describe();
+      }
+    }
+    async clear() {
+      ui.saveStatus.textContent = "";
+      if (await scanRunning(this.book)) {
+        this.grid.setLocked(true);
+        this.describe();
+        return;
+      }
+      const cleared = await clearBook(this.book);
+      this.grid.showMessage(`Cleared ${plural2(cleared, "saved page")}. Scan again to refill this book.`);
+    }
+    /**
+     * Clearing is the only irreversible thing here, so it is held rather than
+     * clicked: a confirm() dialog is dismissed by reflex, and it asks the question
+     * somewhere other than where the action was taken. The button fills as it is
+     * held so the wait reads as progress rather than a dead press.
+     */
+    bindHold() {
+      ui.clear.style.setProperty("--hold-ms", `${HOLD_MS}ms`);
+      let timer;
+      const reset = () => {
+        if (timer !== void 0) clearTimeout(timer);
+        timer = void 0;
+        ui.clear.classList.remove("holding");
+      };
+      const start = () => {
+        if (timer !== void 0 || ui.clear.disabled) return;
+        ui.clear.classList.add("holding");
+        timer = setTimeout(() => {
+          reset();
+          if (ui.clear.disabled) return;
+          void this.clear().catch((error) => {
+            ui.saveStatus.textContent = `Clear failed: ${message(error)}`;
+          });
+        }, HOLD_MS);
+      };
+      const cancel = reset;
+      ui.clear.addEventListener("pointerdown", start);
+      for (const event of ["pointerup", "pointerleave", "pointercancel"]) {
+        ui.clear.addEventListener(event, cancel);
+      }
+      addEventListener("blur", cancel);
+      ui.clear.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") start();
+      });
+      ui.clear.addEventListener("keyup", cancel);
+    }
+  };
 
   // src/preview/grid.ts
   var ARM_MS = 3e3;
@@ -267,6 +781,22 @@
       }
     }
     /**
+     * The size every page of this book was captured at. A scan pins the reader's
+     * layout, so this is one number for the whole book — but a cache can still
+     * hold two, from a spread captured before splitting was turned on or a window
+     * resized between two runs, and that is worth saying because it decides how
+     * the pages sit on the paper. Empty until the first page has loaded.
+     */
+    capturedSize() {
+      const sizes = /* @__PURE__ */ new Set();
+      for (const tile of this.tiles.values()) {
+        if (tile.size) sizes.add(tile.size);
+      }
+      if (sizes.size > 1) return `${sizes.size} capture sizes`;
+      for (const size of sizes) return size;
+      return null;
+    }
+    /**
      * Redraw everything that depends on the set of captures rather than on one
      * page: the summary line and the repeat markers, both of which change when a
      * page is deleted.
@@ -281,10 +811,12 @@
         tile.label.textContent = tile.text + (repeated ? " · repeat" : "");
         tile.mark.textContent = this.recognised.has(index) ? "text" : "";
       }
-      ui.summary.replaceChildren(span(plural(this.records.length, "page")));
+      ui.summary.replaceChildren(span(plural2(this.records.length, "page")));
       if (this.total) ui.summary.append(span(` of about ${this.total}`));
+      const size = this.capturedSize();
+      if (size) ui.summary.append(span(` · ${size}`));
       if (duplicates) {
-        ui.summary.append(span(" · "), span(plural(duplicates, "duplicate"), "warn"));
+        ui.summary.append(span(" · "), span(plural2(duplicates, "duplicate"), "warn"));
       }
       ui.summary.append(span(" · drag to reorder · the PDF follows this order"));
       this.onChange();
@@ -372,7 +904,7 @@
         image.draggable = false;
         image.addEventListener("click", () => this.openViewer(page.dataUrl, text));
         figure.append(image);
-        caption.append(label, span(`${page.width}×${page.height}`));
+        caption.append(label);
       } else {
         figure.classList.add("gone");
         label.textContent = `${text} — missing from storage`;
@@ -388,7 +920,8 @@
         text,
         mark,
         remove,
-        fingerprint: capture.fingerprint
+        fingerprint: capture.fingerprint,
+        size: page?.width && page.height ? `${page.width}×${page.height}` : null
       });
       return figure;
     }
@@ -653,6 +1186,9 @@
     grid;
     running = false;
     stopRequested = false;
+    /** Clearing the book underneath a run would delete the pages it is reading. */
+    onBusy = () => {
+    };
     constructor(book2, grid2) {
       this.book = book2;
       this.grid = grid2;
@@ -676,11 +1212,12 @@
       }
       const done = this.grid.recognisedCount();
       ui.ocrStart.disabled = done === total;
-      ui.ocrStatus.textContent = done === total ? `All ${plural(total, "page")} carry searchable text.` : `${done} of ${total} pages have a text layer · the PDF gets one wherever it exists.`;
+      ui.ocrStatus.textContent = done === total ? `All ${plural2(total, "page")} carry searchable text.` : `${done} of ${total} pages have a text layer · the PDF gets one wherever it exists.`;
     }
     async start() {
       if (this.running) return;
       this.running = true;
+      this.onBusy(true);
       this.stopRequested = false;
       ui.ocrStart.hidden = true;
       ui.ocrStop.hidden = false;
@@ -695,12 +1232,13 @@
           },
           shouldStop: () => this.stopRequested
         });
-        const skipped = result.skipped ? `, ${plural(result.skipped, "page")} skipped` : "";
-        outcome = result.stopped ? `Stopped after ${plural(result.recognised, "page")}${skipped}. Start again to carry on.` : `Finished — ${plural(result.recognised, "page")} recognised${skipped}.`;
+        const skipped = result.skipped ? `, ${plural2(result.skipped, "page")} skipped` : "";
+        outcome = result.stopped ? `Stopped after ${plural2(result.recognised, "page")}${skipped}. Start again to carry on.` : `Finished — ${plural2(result.recognised, "page")} recognised${skipped}.`;
       } catch (error) {
         outcome = `OCR failed: ${message(error)}`;
       } finally {
         this.running = false;
+        this.onBusy(false);
         ui.ocrStart.hidden = false;
         ui.ocrStop.hidden = true;
         try {
@@ -718,7 +1256,12 @@
   var book = new URLSearchParams(location.search).get("book") || "";
   var grid = new PreviewGrid(book);
   var ocr = new OcrController(book, grid);
-  grid.onChange = () => ocr.describe();
+  var actions = new BookActions(book, grid);
+  grid.onChange = () => {
+    ocr.describe();
+    actions.describe();
+  };
+  ocr.onBusy = (busy) => actions.setOcrBusy(busy);
   var generation = 0;
   async function load() {
     const mine = ++generation;
@@ -749,6 +1292,7 @@
   async function watchScan() {
     const wasLocked = grid.locked;
     grid.setLocked(await scanRunning(book));
+    actions.describe();
     if (wasLocked && !grid.locked) await reload();
   }
   var watching = false;

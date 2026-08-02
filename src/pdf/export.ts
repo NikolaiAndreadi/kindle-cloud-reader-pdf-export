@@ -1,7 +1,6 @@
 import { loadMeta, loadOcrBatch, pagesInBatches } from '../shared/storage.ts';
-import { notify, removeNoticeLater } from '../content/notice.ts';
 import { bytesFromDataUrl, pdfBuilder } from './builder.ts';
-import { DEFAULT_PAPER, paperLabel } from './paper.ts';
+import { paperLabel } from './paper.ts';
 
 const REVOKE_AFTER_MS = 60000;
 
@@ -16,11 +15,18 @@ function download(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
 }
 
-export async function saveCachedPdf(book: string, paper = DEFAULT_PAPER): Promise<ReaderMessage> {
+/**
+ * Reading a book back out of storage and encoding it takes long enough to need
+ * saying so. Where that is said is the caller's business — this runs on the
+ * preview page now, which has a status line of its own.
+ */
+export async function saveCachedPdf(
+  book: string, paper: PaperName, report: (text: string) => void
+): Promise<ReaderMessage> {
   const meta = await loadMeta(book);
   if (!meta.captures.length) return { message: 'No saved pages for this book.' };
 
-  notify(`Loading ${plural(meta.captures.length, 'cached page')}…`);
+  report(`Loading ${plural(meta.captures.length, 'cached page')}…`);
   const builder = pdfBuilder({ paper });
   let unreadable = 0;
 
@@ -44,14 +50,11 @@ export async function saveCachedPdf(book: string, paper = DEFAULT_PAPER): Promis
       );
     }
     builder.flush();
-    notify(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);
+    report(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);
   }
 
   if (!builder.pages) {
-    const message = 'Saved pages could not be read back from storage.';
-    notify(message);
-    removeNoticeLater();
-    return { message };
+    return { message: 'Saved pages could not be read back from storage.' };
   }
 
   const date = new Date().toISOString().slice(0, 10);
@@ -60,8 +63,7 @@ export async function saveCachedPdf(book: string, paper = DEFAULT_PAPER): Promis
   const notes = [`${paperLabel(paper)} pages`];
   if (builder.textPages) notes.push(`${builder.textPages} with searchable text`);
   if (unreadable) notes.push(`${plural(unreadable, 'page')} could not be read`);
-  const message = `Saved ${builder.pages} pages as PDF · ${notes.join(' · ')}.`;
-  notify(message);
-  removeNoticeLater();
-  return { message };
+  // Returned rather than reported: this is the outcome, and it should stay on
+  // screen after the progress line it replaces has stopped changing.
+  return { message: `Saved ${builder.pages} pages as PDF · ${notes.join(' · ')}.` };
 }
