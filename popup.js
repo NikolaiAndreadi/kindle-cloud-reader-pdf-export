@@ -76,8 +76,7 @@
     bookOptions: required("#bookOptions"),
     bookNote: required("#bookNote"),
     open: required("#open"),
-    start: required("#start"),
-    stop: required("#stop"),
+    scan: required("#scan"),
     save: required("#save"),
     clear: required("#clear"),
     preview: required("#preview")
@@ -123,6 +122,11 @@
     const choice = [...ui.quality.options].find((option) => Number(option.value) === state.quality);
     if (choice) ui.quality.value = choice.value;
   }
+  function scanButton(scanning2, ready) {
+    ui.scan.textContent = scanning2 ? "Stop" : "Scan / resume";
+    ui.scan.classList.toggle("secondary", scanning2);
+    ui.scan.disabled = !ready && !scanning2;
+  }
   function apply(state, onReader, problem) {
     const ready = state?.bookOpen === true;
     const spoken = Date.now() < noticeUntil;
@@ -130,8 +134,7 @@
     ui.controls.hidden = !ready;
     lockBookOptions(state);
     ui.preview.hidden = !state?.count;
-    ui.start.disabled = !ready;
-    ui.stop.disabled = !state?.scanning;
+    scanButton(state?.scanning === true, ready);
     ui.save.disabled = !state?.count;
     ui.clear.disabled = !state?.count || state.scanning;
     if (!state) {
@@ -147,6 +150,7 @@
   var POLL_MS = 1e3;
   var HOLD_MS = 2e3;
   var currentBook = null;
+  var scanning = false;
   var paperChoice = () => isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
   var uiOptions = () => ({
     delay: Number(ui.delay.value),
@@ -181,9 +185,11 @@
       onReader = isReaderUrl((await activeTab())?.url);
       const state = await send("getState");
       currentBook = state.bookId;
+      scanning = state.scanning;
       apply(state, onReader);
     } catch (error) {
       currentBook = null;
+      scanning = false;
       apply(null, onReader, describe(error));
     }
   }
@@ -250,7 +256,8 @@
     window.close();
     return null;
   });
-  onClick(ui.start, async () => {
+  onClick(ui.scan, async () => {
+    if (scanning) return (await send("stopScan")).message;
     const options = uiOptions();
     await chrome.storage.local.set({ options });
     const result = await send("startScan", { options });
@@ -259,10 +266,6 @@
   onClick(ui.save, async () => {
     notice("Building PDF in the reader tab…");
     return (await send("saveCached", { paper: paperChoice() })).message;
-  });
-  onClick(ui.stop, async () => {
-    await send("stopScan");
-    return "Stopping after the current page…";
   });
   holdToClear(ui.clear, async () => (await send("clearCached")).message);
   async function remember(pacing) {

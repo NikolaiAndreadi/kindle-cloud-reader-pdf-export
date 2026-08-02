@@ -78,6 +78,22 @@ function lockBookOptions(state: BookState | null): void {
   if (choice) ui.quality.value = choice.value;
 }
 
+/**
+ * Start and stop are one button, so it has to say which of the two the next
+ * press is. Written from the polled state on every tick rather than toggled
+ * when it is clicked: a scan that reaches the end of the book, fails, or is
+ * stopped from another tab ends without the popup being told, and a button
+ * still offering to stop it would then be a lie.
+ */
+function scanButton(scanning: boolean, ready: boolean): void {
+  ui.scan.textContent = scanning ? 'Stop' : 'Scan / resume';
+  // Orange is the go button; stopping is the quieter of the two.
+  ui.scan.classList.toggle('secondary', scanning);
+  // Still on while scanning even if the book stopped looking open — the reader
+  // repaginating mid-scan must not take away the only way to stop it.
+  ui.scan.disabled = !ready && !scanning;
+}
+
 export function apply(state: BookState | null, onReader: boolean, problem?: string): void {
   const ready = state?.bookOpen === true;
   // Everything else here describes the current state and is safe to rewrite
@@ -93,8 +109,7 @@ export function apply(state: BookState | null, onReader: boolean, problem?: stri
 
   lockBookOptions(state);
   ui.preview.hidden = !state?.count;
-  ui.start.disabled = !ready;
-  ui.stop.disabled = !state?.scanning;
+  scanButton(state?.scanning === true, ready);
   ui.save.disabled = !state?.count;
   ui.clear.disabled = !state?.count || state.scanning;
 

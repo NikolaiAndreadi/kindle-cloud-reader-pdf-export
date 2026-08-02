@@ -54,8 +54,10 @@
           </select>
         </label>
         <div class="actions">
-          <button id="start">Scan / resume</button>
-          <button id="stop" class="secondary">Stop</button>
+          <!-- One button for both halves of the same thing: it says what the
+               next press does, and the poll flips it back to Scan / resume when
+               the scan ends on its own as well as when it is stopped here. -->
+          <button id="scan">Scan / resume</button>
           <button id="save" class="secondary">Save cached pages as PDF</button>
           <button id="preview" class="secondary" hidden>See captured pages</button>
           <button id="clear" class="danger" title="Hold to clear">Clear this book</button>

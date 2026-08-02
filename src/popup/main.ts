@@ -10,6 +10,10 @@ const POLL_MS = 1000;
 const HOLD_MS = 2000;
 
 let currentBook: string | null = null;
+// What the one scan button will do when pressed. Kept here rather than read off
+// the button's own label, so the two cannot disagree about which action is
+// meant, and refreshed on every poll so a scan that ended by itself is noticed.
+let scanning = false;
 
 const paperChoice = (): PaperName => isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
 
@@ -62,9 +66,12 @@ async function refreshState(): Promise<void> {
     onReader = isReaderUrl((await activeTab())?.url);
     const state = await send('getState');
     currentBook = state.bookId;
+    scanning = state.scanning;
     apply(state, onReader);
   } catch (error) {
     currentBook = null;
+    // A tab that cannot answer is not a tab with a scan running in it.
+    scanning = false;
     apply(null, onReader, describe(error));
   }
 }
@@ -162,7 +169,12 @@ onClick(ui.preview, async () => {
   return null;
 });
 
-onClick(ui.start, async () => {
+// The branch is on the tracked state, not on what the label happens to say. The
+// reply is relayed rather than assumed, because a scan can end in the second
+// between two polls: the content script refuses a second start and answers a
+// late stop with "No scan is running" instead of claiming it stopped one.
+onClick(ui.scan, async () => {
+  if (scanning) return (await send('stopScan')).message;
   const options = uiOptions();
   await chrome.storage.local.set({ options });
   const result = await send('startScan', { options });
@@ -172,11 +184,6 @@ onClick(ui.start, async () => {
 onClick(ui.save, async () => {
   notice('Building PDF in the reader tab…');
   return (await send('saveCached', { paper: paperChoice() })).message;
-});
-
-onClick(ui.stop, async () => {
-  await send('stopScan');
-  return 'Stopping after the current page…';
 });
 
 holdToClear(ui.clear, async () => (await send('clearCached')).message);

@@ -1154,7 +1154,9 @@ ${xref}
         return false;
       case "stopScan":
         requestStop();
-        sendResponse({ message: isRunning() ? "Stopping…" : "No scan is running." });
+        sendResponse({
+          message: isRunning() ? "Stopping after the current page…" : "No scan is running."
+        });
         return false;
       case "getState":
         bookState(book).then(sendResponse, (error) => sendResponse({ error: error.message }));

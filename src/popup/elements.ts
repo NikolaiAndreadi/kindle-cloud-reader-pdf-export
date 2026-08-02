@@ -18,8 +18,7 @@ export const ui = {
   bookOptions: required<HTMLDivElement>('#bookOptions'),
   bookNote: required<HTMLParagraphElement>('#bookNote'),
   open: required<HTMLButtonElement>('#open'),
-  start: required<HTMLButtonElement>('#start'),
-  stop: required<HTMLButtonElement>('#stop'),
+  scan: required<HTMLButtonElement>('#scan'),
   save: required<HTMLButtonElement>('#save'),
   clear: required<HTMLButtonElement>('#clear'),
   preview: required<HTMLButtonElement>('#preview')

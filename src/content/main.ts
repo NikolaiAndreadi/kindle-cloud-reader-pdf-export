@@ -94,7 +94,9 @@ chrome.runtime.onMessage.addListener((
 
     case 'stopScan':
       requestStop();
-      sendResponse({ message: isRunning() ? 'Stopping…' : 'No scan is running.' });
+      sendResponse({
+        message: isRunning() ? 'Stopping after the current page…' : 'No scan is running.'
+      });
       return false;
 
     case 'getState':
