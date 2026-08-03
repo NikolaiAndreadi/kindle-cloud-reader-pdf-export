@@ -1,6 +1,6 @@
-# Amazon Cloud Reader Export
+# Personal Cloud Reader Export
 
-A Chrome extension that captures pages already rendered by Kindle Cloud
+A Chrome extension that captures pages already rendered by Amazon Kindle Cloud
 Reader and saves them as a PDF on a real paper size, optionally with an invisible
 OCR text layer so the pages are searchable and selectable. It does not download
 Kindle book files, decrypt content, or communicate with any third-party service.
