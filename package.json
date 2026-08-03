@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Save rendered pages from Kindle Cloud Reader for personal offline use.",
+  "description": "Export rendered pages from books you own in Kindle Cloud Reader to PDF.",
   "scripts": {
     "build": "npm run typecheck && node build.mjs",
     "vendor": "node vendor.mjs",

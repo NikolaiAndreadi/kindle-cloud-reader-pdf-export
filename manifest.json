@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Personal Cloud Reader Export",
   "version": "0.1.0",
-  "description": "Save rendered pages from Kindle Cloud Reader for personal offline use.",
+  "description": "Export rendered pages from books you own in Kindle Cloud Reader to PDF.",
   "permissions": [
     "storage",
     "unlimitedStorage"
