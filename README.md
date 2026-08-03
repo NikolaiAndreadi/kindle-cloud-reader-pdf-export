@@ -1,11 +1,15 @@
 # Kindle Cloud Reader PDF Exporter
 
+[![CI](https://github.com/NikolaiAndreadi/kindle-cloud-reader-pdf-export/actions/workflows/ci.yaml/badge.svg)](https://github.com/NikolaiAndreadi/kindle-cloud-reader-pdf-export/actions/workflows/ci.yaml)
+
 A Chrome extension that exports pages already rendered by Amazon Kindle Cloud
 Reader to a PDF on a real paper size, optionally with an invisible OCR text layer
 so the pages are searchable and selectable.
 
 **Use it only to make personal copies of books you own and are authorized to
 copy.**
+
+<img src="docs/popup-scan-controls.png" alt="The extension popup: page delay and delay jitter sliders, JPEG quality, a split-two-page-spreads checkbox, and Scan / resume and See captured pages and save PDF buttons, above a counter reading 252 saved views of about 329, all searchable" width="320">
 
 Everything runs locally in your browser. Captured pages, book identifiers, and
 OCR data are never uploaded or sent to an external API or cloud AI service. It
@@ -35,6 +39,8 @@ view is never stored twice.
 Everything that acts on the whole book lives behind **See captured pages and save
 PDF**: reordering, deleting single pages, **Page size**, **Add searchable text
 (OCR)**, the two save buttons, and **Clear this book**.
+
+![The captured-pages preview tab: a header reading 252 pages of about 329 at 2408x1448 with drag to reorder, a Page size selector set to A4, Save PDF and Save text PDF buttons, and a row of page thumbnails each with text and img checkboxes](docs/preview-captured-pages.png)
 
 **Page size** writes every page onto one real sheet — **A4**, **US Letter**, or
 **Match capture** to keep whatever pixel size the reader happened to paint. The
