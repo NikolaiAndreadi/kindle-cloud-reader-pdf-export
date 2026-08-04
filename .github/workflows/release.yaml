@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck, lint and test
+        run: npm run check
+
+      - name: Tag matches the manifest version
+        run: |
+          version=$(node -p "require('./manifest.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match manifest.json version $version"
+            exit 1
+          fi
+
+      - name: Committed bundles match src/
+        run: |
+          npm run build
+          if ! git diff --exit-code -- background.js content.js popup.js preview.js; then
+            echo "::error::Bundles are stale. Run 'npm run build' and commit the result."
+            exit 1
+          fi
+
+      - name: vendor/tesseract is unmodified
+        run: |
+          npm run vendor
+          if ! git diff --exit-code -- vendor/tesseract; then
+            echo "::error::vendor/tesseract differs from the packaged upstream copy."
+            exit 1
+          fi
+
+      - name: Package the extension
+        run: npm run pack
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          ## Install
+
+          1. Download the `.zip` below.
+          2. Unzip it, and move the unzipped folder somewhere you will keep it.
+             Chrome loads the extension from that folder every time it starts, so
+             deleting it uninstalls the extension.
+          3. Open `chrome://extensions`, turn on **Developer mode** (top right).
+          4. Click **Load unpacked** and select the unzipped folder itself.
+          5. Open a book at <https://read.amazon.com/> and click the extension.
+
+          Leave **Developer mode** on. This is not published on the Chrome Web
+          Store, and Chrome installs packaged extensions from nowhere else.
+
+          Use it only to make personal copies of books you own and are authorized
+          to copy.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --generate-notes

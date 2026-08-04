@@ -1,6 +1,9 @@
 node_modules/
 *.tsbuildinfo
 .idea
+.DS_Store
+
+dist/
 
 # content.js, popup.js and preview.js are build output, but they are
 # deliberately NOT ignored: Chrome loads them straight from this directory, so

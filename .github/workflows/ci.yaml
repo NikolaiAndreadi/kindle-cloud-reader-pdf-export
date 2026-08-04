@@ -43,3 +43,6 @@ jobs:
             echo "::error::vendor/tesseract differs from the packaged upstream copy."
             exit 1
           fi
+
+      - name: Release zip builds
+        run: npm run pack

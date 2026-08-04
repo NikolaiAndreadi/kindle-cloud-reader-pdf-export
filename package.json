@@ -7,6 +7,7 @@
   "scripts": {
     "build": "npm run typecheck && node build.mjs",
     "vendor": "node vendor.mjs",
+    "pack": "node pack.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test/unit",
     "lint": "biome lint",

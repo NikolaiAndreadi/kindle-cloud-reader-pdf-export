@@ -1,7 +1,14 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "files": {
-    "includes": ["src/**/*.ts", "test/unit/**/*.ts", "build.mjs", "vendor.mjs"]
+    "includes": [
+      "src/**/*.ts",
+      "test/unit/**/*.ts",
+      "build.mjs",
+      "vendor.mjs",
+      "pack.mjs",
+      "version.mjs"
+    ]
   },
   "linter": {
     "enabled": true,

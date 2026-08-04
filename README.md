@@ -18,12 +18,26 @@ telemetry. The OCR engine and English model are bundled with the extension.
 
 ## Install
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked** and select this directory. No build needed — the
-   bundles and the OCR engine are checked in.
-4. Open a book at <https://read.amazon.com/> (regional domains such as
-   `read.amazon.co.uk` and `read.amazon.com.br` work too).
+No git, npm or build needed.
+
+1. Download the `.zip` from the
+   [latest release](https://github.com/NikolaiAndreadi/kindle-cloud-reader-pdf-export/releases/latest).
+2. Unzip it, and move the unzipped folder somewhere you will keep it. Chrome
+   loads the extension from that folder every time it starts, so deleting it uninstalls the extension.
+3. Open `chrome://extensions` and turn on **Developer mode**, top right.
+4. Click **Load unpacked** and select the unzipped folder itself.
+5. Open a book at <https://read.amazon.com/> (regional domains such as
+   `read.amazon.co.uk` and `read.amazon.com.br` work too) and click the
+   extension.
+
+**Developer mode** has to stay on: Chrome installs packaged extensions from the
+Chrome Web Store and nowhere else, and this is
+[not published there on purpose](CONTRIBUTING.md). Updating means downloading a
+newer zip and repeating step 4.
+
+Cloning the repository and running **Load unpacked** on the clone works exactly
+the same way. The bundles and the OCR engine are checked in. This is the way to
+go if you intend to change anything.
 
 ## Using it
 
@@ -126,7 +140,10 @@ npm run build     # typecheck, then bundle src/ to content.js, popup.js, preview
 npm run check     # typecheck, lint and tests
 ```
 
-`npm run watch` rebuilds on change. `npm run vendor` re-copies the OCR engine from
+`npm run watch` rebuilds on change. `npm run pack` writes the release zip to
+`dist/` — the files Chrome loads and nothing else; pushing a `v<version>` tag
+matching `manifest.json` makes GitHub Actions build that zip and publish it as a
+release. `npm run vendor` re-copies the OCR engine from
 `node_modules` into `vendor/tesseract`; that directory is checked in so **Load
 unpacked** works on a fresh clone, and its licenses and upstream versions are
 listed in [`vendor/tesseract/THIRD_PARTY_NOTICES.md`](vendor/tesseract/THIRD_PARTY_NOTICES.md).

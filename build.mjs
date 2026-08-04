@@ -15,6 +15,7 @@ import {
 } from './src/shared/timing.ts';
 import { PAPER_NAMES } from './src/pdf/paper.ts';
 import { VENDOR_DIR, missingVendorFiles } from './vendor.mjs';
+import { readVersions } from './version.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const watch = process.argv.includes('--watch');
@@ -160,6 +161,7 @@ await verifyManifest();
 await verifySliders();
 await verifyPaperSizes();
 await verifyVendored();
+await readVersions(root);
 
 const builds = Object.entries(ENTRIES).map(([outfile, entry]) => ({
   ...options,
