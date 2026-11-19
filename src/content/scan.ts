@@ -2,6 +2,7 @@ import { META_FLUSH_EVERY, loadMeta, nextIndex, saveMeta, storePage } from '../s
 import { clampDelay, clampJitter, jitteredDelay } from '../shared/timing.ts';
 import { bookId, pageCandidates, positionKey, readerPosition } from './dom.ts';
 import { fingerprintOf, renderRegion, viewsOf } from './capture.ts';
+import type { SplitMode } from './capture.ts';
 import { notify, removeNoticeLater } from './notice.ts';
 import { turnProber } from './turning.ts';
 
@@ -120,6 +121,7 @@ interface ViewResult {
 export function prepareBookMode(meta: BookMeta, settings: Settings): void {
   if (!meta.captures.length) {
     meta.split = settings.split;
+    meta.splitByGutter = settings.split;
     meta.quality = settings.quality;
     return;
   }
@@ -152,11 +154,12 @@ async function captureRendered(
   let stored = 0;
   let index = startIndex;
   let offset = 0;
+  const split: SplitMode = !meta.split ? 'off' : meta.splitByGutter ? 'gutter' : 'aspect';
 
   for (const candidate of candidates.slice(0, MAX_SPREAD)) {
     let views: RegionView[] = [];
     try {
-      views = await viewsOf(candidate.element, settings.split);
+      views = await viewsOf(candidate.element, split);
     } catch (error) {
       console.warn('Could not read a rendered page', error);
     }

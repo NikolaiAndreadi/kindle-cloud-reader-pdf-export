@@ -1,12 +1,15 @@
 const DEFAULT_BACKGROUND = '#ffffff';
 const DECODE_TIMEOUT = 3000;
 
-// Above this width/height ratio a capture is a two-column spread, not one page.
+// Only images at least this wide are candidates for splitting.
 const SPREAD_ASPECT = 1.2;
 
 // Side of the downscale used to identify a rendered view. Big enough that two
 // different pages of prose do not average out to the same thumbnail.
 const SIGNATURE_SIDE = 128;
+const GUTTER_TOLERANCE = 12;
+
+export type SplitMode = 'off' | 'gutter' | 'aspect';
 
 const FNV_OFFSET = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
@@ -46,8 +49,7 @@ export function naturalSize(element: PageElement): { width: number; height: numb
 export const isWide = (width: number, height: number): boolean =>
   height > 0 && width / height >= SPREAD_ASPECT;
 
-// The rectangles of a bitmap that should each become a PDF page: a landscape
-// bitmap is a two-column spread, so splitting cuts it down the middle.
+// The rectangles of a bitmap that should each become a PDF page.
 export function regionsFor(width: number, height: number, split: boolean): Region[] {
   if (!width || !height) return [];
   if (!split || !isWide(width, height)) return [{ sx: 0, sy: 0, sw: width, sh: height }];
@@ -78,12 +80,7 @@ export function fingerprintOf(dataUrl: string, width: number, height: number): s
   return `${width}x${height}-${dataUrl.length.toString(36)}-${hash.toString(36)}`;
 }
 
-/**
- * Identity of a rendered region, taken from a small downscale of the source
- * pixels. Cheap enough to run before deciding whether to encode, and unlike a
- * hash of the JPEG it does not change when the quality setting changes.
- */
-function signatureOf(element: PageElement, region: Region): string | null {
+function samplePixels(element: PageElement, region: Region): Uint8ClampedArray | null {
   signatureCanvas ??= document.createElement('canvas');
   signatureCanvas.width = SIGNATURE_SIDE;
   signatureCanvas.height = SIGNATURE_SIDE;
@@ -93,28 +90,70 @@ function signatureOf(element: PageElement, region: Region): string | null {
     context.fillStyle = DEFAULT_BACKGROUND;
     context.fillRect(0, 0, SIGNATURE_SIDE, SIGNATURE_SIDE);
     context.drawImage(element, region.sx, region.sy, region.sw, region.sh, 0, 0, SIGNATURE_SIDE, SIGNATURE_SIDE);
-    const data = context.getImageData(0, 0, SIGNATURE_SIDE, SIGNATURE_SIDE).data;
-    let hash = FNV_OFFSET;
-    for (let i = 0; i < data.length; i++) {
-      if ((i & 3) === 3) continue; // alpha carries nothing here
-      hash ^= data[i]!;
-      hash = Math.imul(hash, FNV_PRIME) >>> 0;
-    }
-    return `${region.sw}x${region.sh}-${hash.toString(36)}`;
+    return context.getImageData(0, 0, SIGNATURE_SIDE, SIGNATURE_SIDE).data;
   } catch {
     // A cross-origin source taints the canvas and blocks getImageData.
     return null;
   }
 }
 
+// The colors on the two sides of a gutter can differ. Check each center column
+// against its own first pixel, then require visible content beside the gutter
+// so a blank landscape view stays whole.
+function hasCenterGutter(pixels: Uint8ClampedArray): boolean {
+  const rowBytes = SIGNATURE_SIDE * 4;
+  const center = rowBytes / 2;
+  let hasContent = false;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const column = i % rowBytes;
+    const gutter = column < center ? center - 4 : center;
+    const contrast = Math.max(
+      Math.abs(pixels[i]! - pixels[gutter]!),
+      Math.abs(pixels[i + 1]! - pixels[gutter + 1]!),
+      Math.abs(pixels[i + 2]! - pixels[gutter + 2]!)
+    );
+    if (contrast <= GUTTER_TOLERANCE) continue;
+    if (column === gutter) return false;
+    hasContent = true;
+  }
+  return hasContent;
+}
+
+// The signature depends on the sampled source pixels, so JPEG quality does
+// not affect it. Keep the hash identical for regions already held in storage.
+function signatureOf(region: Region, pixels: Uint8ClampedArray | null): string | null {
+  if (!pixels) return null;
+  let hash = FNV_OFFSET;
+  for (let i = 0; i < pixels.length; i++) {
+    if ((i & 3) === 3) continue;
+    hash ^= pixels[i]!;
+    hash = Math.imul(hash, FNV_PRIME) >>> 0;
+  }
+  return `${region.sw}x${region.sh}-${hash.toString(36)}`;
+}
+
 // One rendered element can hold two book pages, so this returns each region
 // with its hash and the caller skips encoding anything already captured.
-export async function viewsOf(element: PageElement, split: boolean): Promise<RegionView[]> {
+export async function viewsOf(element: PageElement, split: SplitMode): Promise<RegionView[]> {
   if (!await decoded(element)) return [];
   const { width, height } = naturalSize(element);
-  return regionsFor(width, height, split).map((region) => ({
+  if (!width || !height) return [];
+  const whole = { sx: 0, sy: 0, sw: width, sh: height };
+  const wide = isWide(width, height);
+  // Splitting by aspect alone is preserved for scans that began with that rule.
+  if (split === 'aspect' && wide) return splitViews(element, width, height);
+
+  const pixels = samplePixels(element, whole);
+  if (split === 'gutter' && wide && pixels && hasCenterGutter(pixels)) {
+    return splitViews(element, width, height);
+  }
+  return [{ region: whole, signature: signatureOf(whole, pixels) }];
+}
+
+function splitViews(element: PageElement, width: number, height: number): RegionView[] {
+  return regionsFor(width, height, true).map((region) => ({
     region,
-    signature: signatureOf(element, region)
+    signature: signatureOf(region, samplePixels(element, region))
   }));
 }
 

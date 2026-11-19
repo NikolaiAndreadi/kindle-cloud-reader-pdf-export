@@ -3,7 +3,7 @@
 // aimed. Rather than guess, the scan tries several approaches and keeps
 // whichever one actually moves the reader.
 
-import { NEXT_SELECTOR, RENDERER_SELECTOR } from './dom.ts';
+import { nextPageControl, RENDERER_SELECTOR } from './dom.ts';
 
 export interface TurnStrategy {
   name: string;
@@ -54,8 +54,8 @@ export const TURN_STRATEGIES: TurnStrategy[] = [
   {
     name: 'next-button',
     run: () => {
-      const button = document.querySelector(NEXT_SELECTOR);
-      if (button) clickCentre(button);
+      const control = nextPageControl();
+      if (control) clickCentre(control);
     }
   },
   { name: 'keys-document', run: () => sendArrowRight(document) },

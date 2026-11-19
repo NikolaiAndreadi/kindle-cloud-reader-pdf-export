@@ -20,6 +20,7 @@ describe('prepareBookMode', () => {
     const meta = emptyMeta('B001');
     prepareBookMode(meta, asked(true, .96));
     assert.equal(meta.split, true);
+    assert.equal(meta.splitByGutter, true);
     assert.equal(meta.quality, .96);
   });
 
@@ -39,11 +40,12 @@ describe('prepareBookMode', () => {
   });
 
   it('holds a resume to the quality the cached pages were encoded at', () => {
-    const meta = { ...emptyMeta('B001'), split: true, quality: .75, captures: [capture()] };
+    const meta = { ...emptyMeta('B001'), split: true, splitByGutter: true, quality: .75, captures: [capture()] };
     const settings = asked(true, .96);
     prepareBookMode(meta, settings);
     assert.equal(settings.quality, .75);
     assert.equal(meta.quality, .75);
+    assert.equal(meta.splitByGutter, true);
   });
 
   it('pins the requested quality on a cache written before it was recorded', () => {
@@ -52,6 +54,7 @@ describe('prepareBookMode', () => {
     prepareBookMode(meta, settings);
     assert.equal(meta.quality, .96);
     assert.equal(settings.quality, .96);
+    assert.equal(meta.splitByGutter, undefined);
   });
 });
 

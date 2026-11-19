@@ -13,7 +13,8 @@ const COUNTER_SELECTOR = '[item-i-d="reader-footer-title"], .reader-footer, [dat
 const COUNTER_PATTERN = /\b(Page|Location)\s+([\d,]+)\s+of\s+([\d,]+)\b/i;
 
 export const RENDERER_SELECTOR = '#kr-renderer, .kr-renderer-container-fullpage';
-export const NEXT_SELECTOR = '[aria-label="Next page"], .kr-chevron-container-right, .chevron.right';
+const NEXT_BUTTON_SELECTOR = 'button[aria-label="Next page"], button.chevron.right';
+const NEXT_AREA_SELECTOR = '[aria-label="Next page"], .kr-chevron-container-right, .chevron.right';
 
 const MIN_PAGE_SIDE = 100;
 const DOMINANT_AREA_RATIO = .5;
@@ -24,6 +25,12 @@ const MAX_TEXT_NODES = 20000;
 type SearchRoot = Document | ShadowRoot;
 
 let counterHost: Element | null = null;
+
+export function nextPageControl(): Element | null {
+  // The arrow button sits inside the clickable area in the current reader.
+  // Query it first so a synthetic click reaches the button's event handlers.
+  return document.querySelector(NEXT_BUTTON_SELECTOR) ?? document.querySelector(NEXT_AREA_SELECTOR);
+}
 
 export function bookId(): string {
   const url = new URL(location.href);

@@ -121,13 +121,17 @@
   var COUNTER_SELECTOR = '[item-i-d="reader-footer-title"], .reader-footer, [data-testid="footer"]';
   var COUNTER_PATTERN = /\b(Page|Location)\s+([\d,]+)\s+of\s+([\d,]+)\b/i;
   var RENDERER_SELECTOR = "#kr-renderer, .kr-renderer-container-fullpage";
-  var NEXT_SELECTOR = '[aria-label="Next page"], .kr-chevron-container-right, .chevron.right';
+  var NEXT_BUTTON_SELECTOR = 'button[aria-label="Next page"], button.chevron.right';
+  var NEXT_AREA_SELECTOR = '[aria-label="Next page"], .kr-chevron-container-right, .chevron.right';
   var MIN_PAGE_SIDE = 100;
   var DOMINANT_AREA_RATIO = 0.5;
   var MAX_ROOTS = 50;
   var MAX_ROOT_DEPTH = 3;
   var MAX_TEXT_NODES = 2e4;
   var counterHost = null;
+  function nextPageControl() {
+    return document.querySelector(NEXT_BUTTON_SELECTOR) ?? document.querySelector(NEXT_AREA_SELECTOR);
+  }
   function bookId() {
     const url = new URL(location.href);
     const asin = url.searchParams.get("asin") || url.hash.match(/asin[=/]([A-Z0-9]+)/i)?.[1] || url.pathname.match(/\/asin\/([A-Z0-9]+)/i)?.[1];
@@ -281,6 +285,7 @@
   var DECODE_TIMEOUT = 3e3;
   var SPREAD_ASPECT = 1.2;
   var SIGNATURE_SIDE = 128;
+  var GUTTER_TOLERANCE = 12;
   var FNV_OFFSET = 2166136261;
   var FNV_PRIME = 16777619;
   var signatureCanvas = null;
@@ -327,7 +332,7 @@
     mix(dataUrl.slice(middle, middle + 512));
     return `${width}x${height}-${dataUrl.length.toString(36)}-${hash.toString(36)}`;
   }
-  function signatureOf(element, region) {
+  function samplePixels(element, region) {
     signatureCanvas ??= document.createElement("canvas");
     signatureCanvas.width = SIGNATURE_SIDE;
     signatureCanvas.height = SIGNATURE_SIDE;
@@ -337,24 +342,56 @@
       context.fillStyle = DEFAULT_BACKGROUND;
       context.fillRect(0, 0, SIGNATURE_SIDE, SIGNATURE_SIDE);
       context.drawImage(element, region.sx, region.sy, region.sw, region.sh, 0, 0, SIGNATURE_SIDE, SIGNATURE_SIDE);
-      const data = context.getImageData(0, 0, SIGNATURE_SIDE, SIGNATURE_SIDE).data;
-      let hash = FNV_OFFSET;
-      for (let i = 0; i < data.length; i++) {
-        if ((i & 3) === 3) continue;
-        hash ^= data[i];
-        hash = Math.imul(hash, FNV_PRIME) >>> 0;
-      }
-      return `${region.sw}x${region.sh}-${hash.toString(36)}`;
+      return context.getImageData(0, 0, SIGNATURE_SIDE, SIGNATURE_SIDE).data;
     } catch {
       return null;
     }
   }
+  function hasCenterGutter(pixels) {
+    const rowBytes = SIGNATURE_SIDE * 4;
+    const center = rowBytes / 2;
+    let hasContent = false;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const column = i % rowBytes;
+      const gutter = column < center ? center - 4 : center;
+      const contrast = Math.max(
+        Math.abs(pixels[i] - pixels[gutter]),
+        Math.abs(pixels[i + 1] - pixels[gutter + 1]),
+        Math.abs(pixels[i + 2] - pixels[gutter + 2])
+      );
+      if (contrast <= GUTTER_TOLERANCE) continue;
+      if (column === gutter) return false;
+      hasContent = true;
+    }
+    return hasContent;
+  }
+  function signatureOf(region, pixels) {
+    if (!pixels) return null;
+    let hash = FNV_OFFSET;
+    for (let i = 0; i < pixels.length; i++) {
+      if ((i & 3) === 3) continue;
+      hash ^= pixels[i];
+      hash = Math.imul(hash, FNV_PRIME) >>> 0;
+    }
+    return `${region.sw}x${region.sh}-${hash.toString(36)}`;
+  }
   async function viewsOf(element, split) {
     if (!await decoded(element)) return [];
     const { width, height } = naturalSize(element);
-    return regionsFor(width, height, split).map((region) => ({
+    if (!width || !height) return [];
+    const whole = { sx: 0, sy: 0, sw: width, sh: height };
+    const wide = isWide(width, height);
+    if (split === "aspect" && wide) return splitViews(element, width, height);
+    const pixels = samplePixels(element, whole);
+    if (split === "gutter" && wide && pixels && hasCenterGutter(pixels)) {
+      return splitViews(element, width, height);
+    }
+    return [{ region: whole, signature: signatureOf(whole, pixels) }];
+  }
+  function splitViews(element, width, height) {
+    return regionsFor(width, height, true).map((region) => ({
       region,
-      signature: signatureOf(element, region)
+      signature: signatureOf(region, samplePixels(element, region))
     }));
   }
   function renderRegion(element, region, quality) {
@@ -418,8 +455,8 @@
     {
       name: "next-button",
       run: () => {
-        const button = document.querySelector(NEXT_SELECTOR);
-        if (button) clickCentre(button);
+        const control = nextPageControl();
+        if (control) clickCentre(control);
       }
     },
     { name: "keys-document", run: () => sendArrowRight(document) },
@@ -525,6 +562,7 @@
   function prepareBookMode(meta, settings) {
     if (!meta.captures.length) {
       meta.split = settings.split;
+      meta.splitByGutter = settings.split;
       meta.quality = settings.quality;
       return;
     }
@@ -543,10 +581,11 @@
     let stored = 0;
     let index = startIndex;
     let offset = 0;
+    const split = !meta.split ? "off" : meta.splitByGutter ? "gutter" : "aspect";
     for (const candidate of candidates.slice(0, MAX_SPREAD)) {
       let views = [];
       try {
-        views = await viewsOf(candidate.element, settings.split);
+        views = await viewsOf(candidate.element, split);
       } catch (error) {
         console.warn("Could not read a rendered page", error);
       }

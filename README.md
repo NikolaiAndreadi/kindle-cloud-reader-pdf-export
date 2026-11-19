@@ -61,10 +61,9 @@ PDF**: reordering, deleting single pages, **Page size**, **Add searchable text
 bitmap is fitted and centred, so a page that does not match the sheet gets even
 bands rather than being cropped or stretched.
 
-In two-column mode the reader paints a whole spread as one landscape image.
-**Split two-page spreads** (on by default) cuts those down the middle into two
-portrait pages. Portrait captures are never touched, so switching the reader to
-single column turns splitting off by itself.
+In two-column mode the reader can paint a whole spread as one landscape image.
+**Split two-page spreads** (on by default) cuts wide images with a clear center
+gutter in two. Wide captures with content across the center stay whole.
 
 ### Searchable text
 

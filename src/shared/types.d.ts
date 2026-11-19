@@ -38,6 +38,7 @@ interface BookMeta {
   total: number | null;
   kind: 'page' | 'location' | null;
   split: boolean | null;
+  splitByGutter?: boolean;
   /**
    * Fixed by the first scan so one book cannot end up holding pages encoded two
    * ways. Null here and in `split` means a cache written before the setting was
@@ -191,9 +192,7 @@ interface ScanOptions {
   jitter?: number;
   quality?: number;
   /**
-   * Cut a landscape capture down the middle into two portrait pages. The reader
-   * paints a two-column spread as one wide bitmap, so this gives one PDF page
-   * per book page without having to change the reader's layout.
+   * Split a wide capture with a clear center gutter into two PDF pages.
    */
   split?: boolean;
 }

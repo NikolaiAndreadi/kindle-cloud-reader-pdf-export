@@ -1,7 +1,24 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { parseCounter, positionKey } from '../../src/content/dom.ts';
+import { nextPageControl, parseCounter, positionKey } from '../../src/content/dom.ts';
+
+describe('nextPageControl', () => {
+  for (const hasButton of [true, false]) {
+    it(hasButton ? 'prefers the child button to its wrapper' : 'keeps the wrapper fallback', (test) => {
+      const originalDocument = globalThis.document;
+      const button = { tagName: 'BUTTON' };
+      const wrapper = { tagName: 'DIV' };
+      globalThis.document = {
+        querySelector: (selector: string) =>
+          selector.includes('.kr-chevron-container-right') ? wrapper : hasButton ? button : null
+      } as unknown as Document;
+      test.after(() => { globalThis.document = originalDocument; });
+
+      assert.equal(nextPageControl(), hasButton ? button : wrapper);
+    });
+  }
+});
 
 describe('parseCounter', () => {
   it('reads a page counter', () => {

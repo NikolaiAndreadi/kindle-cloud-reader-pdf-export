@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 
-import { fingerprintOf, isWide, regionsFor } from '../../src/content/capture.ts';
+import { fingerprintOf, isWide, regionsFor, viewsOf } from '../../src/content/capture.ts';
 
 describe('isWide', () => {
-  it('treats a landscape bitmap as a spread', () => {
+  it('considers a wide landscape bitmap for splitting', () => {
     assert.equal(isWide(1600, 1200), true);
   });
 
@@ -48,6 +48,77 @@ describe('regionsFor', () => {
     assert.ok(left && right);
     assert.equal(left.sw + right.sw, 2401);
     assert.equal(right.sx, left.sw);
+  });
+});
+
+describe('viewsOf', () => {
+  const side = 128;
+  const element = { localName: 'canvas', width: 1537, height: 655 } as HTMLCanvasElement;
+  const whole = { sx: 0, sy: 0, sw: 1537, sh: 655 };
+  const originalDocument = globalThis.document;
+  let pixels: Uint8ClampedArray | null;
+
+  before(() => {
+    const context = {
+      fillRect() {},
+      drawImage() {},
+      getImageData() {
+        if (!pixels) throw new Error('Unreadable pixels');
+        return { data: pixels };
+      }
+    };
+    globalThis.document = {
+      createElement: () => ({ getContext: () => context })
+    } as unknown as Document;
+  });
+
+  after(() => {
+    globalThis.document = originalDocument;
+  });
+
+  function sample(gutter: boolean, background = 255): Uint8ClampedArray {
+    const data = new Uint8ClampedArray(side * side * 4).fill(background);
+    // Synthetic lines of text with or without space at the center.
+    for (let y = 20; y < 110; y += 8) {
+      for (let x = 10; x < 118; x++) {
+        if (gutter && x >= 59 && x <= 68) continue;
+        data.fill(255 - background, (y * side + x) * 4, (y * side + x) * 4 + 3);
+      }
+    }
+    return data;
+  }
+
+  it('keeps the reported 1537 × 655 layout whole when text crosses the center', async () => {
+    pixels = sample(false);
+    const views = await viewsOf(element, 'gutter');
+    assert.deepEqual(views.map(({ region }) => region), [whole]);
+    assert.deepEqual(views, await viewsOf(element, 'off'));
+    assert.match(views[0]?.signature ?? '', /^1537x655-/);
+  });
+
+  it('splits the same geometry when the center gutter is clear, including on a dark page', async () => {
+    for (const background of [255, 16]) {
+      pixels = sample(true, background);
+      const views = await viewsOf(element, 'gutter');
+      assert.deepEqual(views.map(({ region }) => region), [
+        { sx: 0, sy: 0, sw: 768, sh: 655 },
+        { sx: 768, sy: 0, sw: 769, sh: 655 }
+      ]);
+      assert.deepEqual(views, await viewsOf(element, 'aspect'));
+      assert.deepEqual((await viewsOf(element, 'off')).map(({ region }) => region), [whole]);
+    }
+  });
+
+  it('keeps blank or unreadable views intact', async () => {
+    pixels = new Uint8ClampedArray(side * side * 4).fill(255);
+    assert.deepEqual((await viewsOf(element, 'gutter')).map(({ region }) => region), [whole]);
+    pixels = null;
+    assert.deepEqual(await viewsOf(element, 'gutter'), [{ region: whole, signature: null }]);
+  });
+
+  it('uses the original split rule when resuming a legacy cache', async () => {
+    pixels = sample(false);
+    assert.deepEqual((await viewsOf(element, 'aspect')).map(({ region }) => region.sw), [768, 769]);
   });
 });
 
