@@ -76,11 +76,6 @@ interface StoredOcr {
   picture?: number;
 }
 
-/**
- * A freshly encoded page, before it is persisted. It carries no identity: the
- * signature of the source pixels is computed before encoding, and hashing the
- * JPEG is only a fallback for a tainted canvas.
- */
 interface CapturedPage {
   width: number;
   height: number;
@@ -109,10 +104,7 @@ interface RegionView {
 interface PdfPage {
   width: number;
   height: number;
-  /**
-   * The captured JPEG. Absent in 'text' mode, where nothing is drawn and the
-   * dimensions are only the coordinate space the OCR boxes were measured in.
-   */
+  /** JPEG or PNG for image pages, omitted for text-only sheets. */
   bytes?: Uint8Array;
 }
 
@@ -179,7 +171,8 @@ interface PdfBuilder {
   readonly textPages: number;
   /** Pages that carry a bitmap — every page of a scan, the plates of a text PDF. */
   readonly imagePages: number;
-  addPage(page: PdfPage, words?: OcrWord[]): void;
+  /** True when the builder wrote a sheet. */
+  addPage(page: PdfPage, words?: OcrWord[]): boolean;
   /** Coalesce buffered output into a Blob so it can leave the JS heap. */
   flush(): void;
   finish(): Blob;

@@ -76,8 +76,11 @@ it is resumable: results are saved as they finish, and closing the tab costs at
 most the pages in flight.
 
 Accuracy comes from the pixels, so it is only as good as the capture. On clean
-printed prose the **Balanced** JPEG quality is enough; **High** is the first thing
-to change if a book comes out badly. The engine is English only.
+printed prose the **Balanced** image quality is enough; **High** is the first thing
+to change if a book comes out badly. **Lossless** stores every page as PNG, with
+no compression artefacts at all — worth it for photographs and very small print,
+at several times the storage and PDF size. Like the split setting, quality is
+fixed by a book's first scan. The engine is English only.
 
 You do not need to re-scan a book captured before you decided you wanted text.
 
@@ -99,6 +102,10 @@ it and that page goes into the text PDF as the image, with the invisible words
 still over the top. Pages that are mostly picture get ticked for you, as do pages
 OCR failed on, which are exactly the ones to keep as bitmaps. Once you touch a
 box, your answer stands and no later run overrules it.
+
+By default, the scan downloads as `kindle-<book id>-<date>.pdf` and the text PDF
+as `kindle-<book id>-text-<date>.pdf`. Enter a name in the **File name** box to
+save them as `<name>.pdf` and `<name>-text.pdf`. The preview remembers it for that book.
 
 ## When it stops working
 

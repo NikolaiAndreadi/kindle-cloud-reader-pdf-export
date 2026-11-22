@@ -15,6 +15,22 @@ const capture = (): CaptureRecord => ({
 const asked = (split: boolean, quality = .88): Settings =>
   settingsFrom({ split, quality });
 
+describe('settingsFrom quality', () => {
+  it('passes lossless through instead of clamping it to the JPEG ceiling', () => {
+    assert.equal(settingsFrom({ quality: 1 }).quality, 1);
+    assert.equal(settingsFrom({ quality: .99 }).quality, .98);
+    assert.equal(settingsFrom({ quality: 1.5 }).quality, .98);
+    assert.equal(settingsFrom({}).quality, .88);
+  });
+
+  it('pins a lossless book like any other quality', () => {
+    const meta = { ...emptyMeta('B001'), split: true, quality: 1, captures: [capture()] };
+    const settings = asked(true, .88);
+    prepareBookMode(meta, settings);
+    assert.equal(settings.quality, 1);
+  });
+});
+
 describe('prepareBookMode', () => {
   it('records the mode when starting an empty cache', () => {
     const meta = emptyMeta('B001');
@@ -46,6 +62,14 @@ describe('prepareBookMode', () => {
     assert.equal(settings.quality, .75);
     assert.equal(meta.quality, .75);
     assert.equal(meta.splitByGutter, true);
+  });
+
+  it('resumes legacy JPEG pages at Balanced when lossless was requested', () => {
+    const meta = { ...emptyMeta('B001'), split: true, captures: [capture()] };
+    const settings = asked(true, 1);
+    prepareBookMode(meta, settings);
+    assert.equal(meta.quality, .88);
+    assert.equal(settings.quality, .88);
   });
 
   it('pins the requested quality on a cache written before it was recorded', () => {

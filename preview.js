@@ -97,6 +97,7 @@
 
   // src/shared/storage.ts
   var READ_BATCH = 20;
+  var BITMAP_BATCH = 4;
   var metaKey = (book2) => `book:${book2}:meta`;
   var pageKey = (book2, index) => `book:${book2}:page:${String(index).padStart(6, "0")}`;
   var ocrKey = (book2, index, fingerprint) => `book:${book2}:ocr:${String(index).padStart(6, "0")}:${fingerprint}`;
@@ -113,6 +114,16 @@
     return legacy;
   }
   var savePaper = (paper) => chrome.storage.local.set({ [PAPER_KEY]: paper });
+  var fileNameKey = (book2) => `book:${book2}:filename`;
+  async function loadFileName(book2) {
+    const key = fileNameKey(book2);
+    const stored = (await chrome.storage.local.get(key))[key];
+    return typeof stored === "string" ? stored : "";
+  }
+  function saveFileName(book2, name) {
+    const key = fileNameKey(book2);
+    return name.trim() ? chrome.storage.local.set({ [key]: name }) : chrome.storage.local.remove(key);
+  }
   var emptyMeta = (book2) => ({
     version: 2,
     bookId: book2,
@@ -146,7 +157,7 @@
     }
     return found;
   }
-  async function* pagesInBatches(book2, captures, size = READ_BATCH) {
+  async function* pagesInBatches(book2, captures, size = BITMAP_BATCH) {
     for (let start = 0; start < captures.length; start += size) {
       const batch = captures.slice(start, start + size);
       const found = await loadPageBatch(book2, batch);
@@ -257,6 +268,74 @@
       if (capture.fingerprint) counts.set(capture.fingerprint, (counts.get(capture.fingerprint) || 0) + 1);
     }
     return counts;
+  }
+
+  // src/shared/png.ts
+  var SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+  var COLOR_GRAY = 0;
+  var COLOR_RGB = 2;
+  function isPng(bytes) {
+    return bytes.length >= SIGNATURE.length && SIGNATURE.every((value, i) => bytes[i] === value);
+  }
+  var crcTable = null;
+  function crc32(bytes, start, end) {
+    if (!crcTable) {
+      crcTable = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) {
+        let c2 = n;
+        for (let k = 0; k < 8; k++) c2 = c2 & 1 ? 3988292384 ^ c2 >>> 1 : c2 >>> 1;
+        crcTable[n] = c2 >>> 0;
+      }
+    }
+    let c = 4294967295;
+    for (let i = start; i < end; i++) c = crcTable[(c ^ bytes[i]) & 255] ^ c >>> 8;
+    return (c ^ 4294967295) >>> 0;
+  }
+  function readPng(bytes) {
+    if (!isPng(bytes)) return null;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let width = 0;
+    let height = 0;
+    let colors = 0;
+    const idat = [];
+    let complete = false;
+    for (let offset = SIGNATURE.length; offset + 12 <= bytes.length; ) {
+      const length = view.getUint32(offset);
+      const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+      const start = offset + 8;
+      const end = start + length;
+      if (end + 4 > bytes.length || view.getUint32(end) !== crc32(bytes, offset + 4, end)) return null;
+      if (type === "IHDR") {
+        if (length !== 13 || offset !== SIGNATURE.length) return null;
+        width = view.getUint32(start);
+        height = view.getUint32(start + 4);
+        const depth = bytes[start + 8];
+        const color = bytes[start + 9];
+        const interlace = bytes[start + 12];
+        if (depth !== 8 || bytes[start + 10] !== 0 || bytes[start + 11] !== 0 || interlace !== 0) return null;
+        if (color === COLOR_RGB) colors = 3;
+        else if (color === COLOR_GRAY) colors = 1;
+        else return null;
+      } else if (!colors || type === "tRNS") {
+        return null;
+      } else if (type === "IDAT") {
+        if (length) idat.push(bytes.subarray(start, end));
+      } else if (type === "IEND") {
+        complete = length === 0;
+        break;
+      }
+      offset = end + 4;
+    }
+    if (!complete || !width || !height || !colors || !idat.length) return null;
+    const data = idat.length === 1 ? idat[0] : new Uint8Array(idat.reduce((sum, part) => sum + part.length, 0));
+    if (idat.length > 1) {
+      let offset = 0;
+      for (const part of idat) {
+        data.set(part, offset);
+        offset += part.length;
+      }
+    }
+    return { width, height, colors, data };
   }
 
   // src/pdf/text.ts
@@ -587,10 +666,31 @@ ${visible ? FILL : INVISIBLE} Tr
   function bytesFromDataUrl(dataUrl) {
     const comma = dataUrl.indexOf(",");
     if (comma < 0) return null;
-    const binary = atob(dataUrl.slice(comma + 1));
+    let binary;
+    try {
+      binary = atob(dataUrl.slice(comma + 1));
+    } catch {
+      return null;
+    }
+    if (!binary.length) return null;
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return bytes;
+  }
+  function imageObject(bytes, width, height) {
+    if (bytes[0] === 255 && bytes[1] === 216) {
+      return {
+        dict: `/Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,
+        data: bytes
+      };
+    }
+    const png = readPng(bytes);
+    if (!png) return null;
+    const space = png.colors === 1 ? "/DeviceGray" : "/DeviceRGB";
+    return {
+      dict: `/Width ${png.width} /Height ${png.height} /ColorSpace ${space} /BitsPerComponent 8 /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors ${png.colors} /BitsPerComponent 8 /Columns ${png.width} >>`,
+      data: png.data
+    };
   }
   function pdfBuilder(options = {}) {
     const paper = options.paper ?? DEFAULT_PAPER;
@@ -637,9 +737,9 @@ ${visible ? FILL : INVISIBLE} Tr
       flush,
       addPage(page, words) {
         const layout = layoutFor(page.width, page.height, paper);
-        if (!layout) return;
-        const image = page.bytes;
-        if (mode !== "text" && !image) return;
+        if (!layout) return false;
+        const image = page.bytes ? imageObject(page.bytes, page.width, page.height) : null;
+        if (mode !== "text" && !image) return false;
         const style = image ? "invisible" : "visible";
         const index = pageIds.length;
         const pageId = claim();
@@ -653,10 +753,10 @@ ${visible ? FILL : INVISIBLE} Tr
           withImage += 1;
           offsets[imageId] = length;
           push(`${imageId} 0 obj
-<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.length} >>
+<< /Type /XObject /Subtype /Image ${image.dict} /Length ${image.data.length} >>
 stream
 `);
-          push(image);
+          push(image.data);
           push("\nendstream\nendobj\n");
           command = `q
 ${pt(layout.width)} 0 0 ${pt(layout.height)} ${pt(layout.x)} ${pt(layout.y)} cm
@@ -677,6 +777,7 @@ Q
         object(contentId, `<< /Length ${command.length} >>
 stream
 ${command}endstream`);
+        return true;
       },
       finish() {
         object(CATALOG_ID, `<< /Type /Catalog /Pages ${PAGES_ID} 0 R >>`);
@@ -717,6 +818,27 @@ ${xref}
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
   }
+  var MAX_BASE_BYTES = 150;
+  var RESERVED = '<>:"/\\|?*';
+  function cleanFileName(name) {
+    const replaced = [...name].map((ch) => ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 || RESERVED.includes(ch) ? " " : ch).join("");
+    const cleaned = replaced.replace(/\s+/g, " ").trim().replace(/\.pdf$/i, "").replace(/^[.\s]+|[.\s]+$/g, "");
+    const encoder2 = new TextEncoder();
+    let base = "";
+    let bytes = 0;
+    for (const ch of cleaned) {
+      bytes += encoder2.encode(ch).length;
+      if (bytes > MAX_BASE_BYTES) break;
+      base += ch;
+    }
+    return base.replace(/[.\s]+$/g, "");
+  }
+  var defaultFileName = (book2, date) => `kindle-${book2}-${date}`;
+  function pdfFileName(book2, mode, name, date) {
+    const suffix = mode === "text" ? "-text" : "";
+    const custom = cleanFileName(name ?? "");
+    return custom ? `${custom}${suffix}.pdf` : `kindle-${book2}${suffix}-${date}.pdf`;
+  }
   async function saveCachedPdf(book2, options, report) {
     const meta = await loadMeta(book2);
     if (!meta.captures.length) return { message: "No saved pages for this book." };
@@ -729,7 +851,7 @@ ${xref}
       return { message: "Saved pages could not be read back from storage." };
     }
     const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    download(builder.finish(), `kindle-${book2}${mode === "text" ? "-text" : ""}-${date}.pdf`);
+    download(builder.finish(), pdfFileName(book2, mode, options.fileName, date));
     const notes = [`${paperLabel(options.paper)} pages`];
     if (mode === "text") {
       notes.push(`${builder.textPages} with recognised text`);
@@ -750,10 +872,11 @@ ${xref}
         }
         const words = ocr2.get(capture.index);
         const usable = words && words.width === page.width && words.height === page.height;
-        builder.addPage(
+        const written = builder.addPage(
           { width: page.width, height: page.height, bytes },
           usable ? words.words : void 0
         );
+        if (!written) unreadable += 1;
       }
       builder.flush();
       report(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);
@@ -766,7 +889,7 @@ ${xref}
     let unreadable = 0;
     let previous;
     let waiting = 0;
-    for await (const batch of ocrInBatches(book2, meta.captures)) {
+    for await (const batch of ocrInBatches(book2, meta.captures, BITMAP_BATCH)) {
       const wanted = batch.filter(({ capture, ocr: ocr2 }) => capture.asImage || !sizeOf(ocr2)).map(({ capture }) => capture);
       const pages = wanted.length ? await loadPageBatch(book2, wanted) : void 0;
       for (const { capture, ocr: ocr2 } of batch) {
@@ -786,12 +909,13 @@ ${xref}
         const placeable = bytes ? measured?.width === stored?.width && measured?.height === stored?.height : true;
         previous = bytes ? sizeOf(stored) ?? size : size;
         for (; waiting > 0; waiting--) builder.addPage(previous);
+        const imagesBefore = builder.imagePages;
         builder.addPage(
           bytes ? { ...previous, bytes } : previous,
           placeable ? measured?.words : void 0
         );
         if (measured) recognised += 1;
-        if (capture.asImage && !bytes) unreadable += 1;
+        if (capture.asImage && builder.imagePages === imagesBefore) unreadable += 1;
       }
       builder.flush();
       report(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);
@@ -799,7 +923,6 @@ ${xref}
     if (!recognised) {
       return { blocked: 'No recognised text in this book yet — run "Add searchable text (OCR)" first.' };
     }
-    for (; waiting > 0 && previous; waiting--) builder.addPage(previous);
     return { unreadable };
   }
 
@@ -820,6 +943,7 @@ ${xref}
     ocrStop: required("ocrStop"),
     ocrStatus: required("ocrStatus"),
     paper: required("paper"),
+    fileName: required("fileName"),
     save: required("save"),
     saveText: required("saveText"),
     saveStatus: required("saveStatus"),
@@ -854,6 +978,15 @@ ${xref}
       ui.paper.addEventListener("change", () => {
         if (isPaperName(ui.paper.value)) void savePaper(ui.paper.value);
       });
+      ui.fileName.placeholder = defaultFileName(book2, (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+      let nameEdited = false;
+      void loadFileName(book2).then((name) => {
+        if (!nameEdited) ui.fileName.value = name;
+      });
+      ui.fileName.addEventListener("input", () => {
+        nameEdited = true;
+        void saveFileName(book2, ui.fileName.value).catch((error) => grid2.showError(error));
+      });
       addEventListener("beforeunload", (event) => {
         if (this.saving) event.preventDefault();
       });
@@ -886,7 +1019,8 @@ ${xref}
       this.describe();
       try {
         const paper = isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
-        const result = await saveCachedPdf(this.book, { paper, mode }, (text) => {
+        const fileName = ui.fileName.value;
+        const result = await saveCachedPdf(this.book, { paper, mode, fileName }, (text) => {
           ui.saveStatus.textContent = text;
         });
         ui.saveStatus.textContent = result.message;
@@ -948,6 +1082,25 @@ ${xref}
   // src/preview/grid.ts
   var ARM_MS = 3e3;
   var LOCK_TEXT = "A scan is running — reordering and deleting are paused until it finishes.";
+  async function thumbnailUrl(dataUrl) {
+    const image = new Image();
+    image.src = dataUrl;
+    try {
+      await image.decode();
+      const scale = Math.min(1, 320 / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext("2d");
+      if (!context) return void 0;
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.8);
+    } catch {
+      return void 0;
+    } finally {
+      image.removeAttribute("src");
+    }
+  }
   var PreviewGrid = class {
     book;
     records = [];
@@ -964,6 +1117,7 @@ ${xref}
       this.book = book2;
       ui.lock.textContent = LOCK_TEXT;
       ui.viewer.addEventListener("click", () => ui.viewer.close());
+      ui.viewer.addEventListener("close", () => ui.viewerImage.removeAttribute("src"));
       this.bindDragging();
     }
     get captures() {
@@ -1002,8 +1156,8 @@ ${xref}
       this.tiles.clear();
       ui.grid.replaceChildren();
     }
-    append(capture, page) {
-      ui.grid.append(this.createTile(capture, page));
+    append(capture, page, thumbnail) {
+      ui.grid.append(this.createTile(capture, page, thumbnail));
     }
     async refreshRecognised() {
       this.recognised = await recognisedIndexes(this.book, this.records);
@@ -1069,10 +1223,12 @@ ${xref}
       ui.summary.append(span(" · drag to reorder · the PDF follows this order"));
       this.onChange();
     }
-    openViewer(dataUrl, label) {
-      ui.viewerImage.src = dataUrl;
+    async openViewer(capture, label) {
+      const page = (await loadPageBatch(this.book, [capture])).get(capture.index);
+      if (!page?.dataUrl) throw new Error(`Capture #${capture.index} is missing from storage.`);
+      ui.viewerImage.src = page.dataUrl;
       ui.viewerImage.alt = label;
-      ui.viewer.showModal();
+      if (!ui.viewer.open) ui.viewer.showModal();
     }
     disarm() {
       if (!this.armed) return;
@@ -1180,36 +1336,34 @@ ${xref}
         this.showError(error);
       }
     }
-    createTile(capture, page) {
+    createTile(capture, page, thumbnail) {
       const figure = document.createElement("figure");
       figure.draggable = !this.editLocked;
       figure.dataset.index = String(capture.index);
       const text = `#${capture.index}${page?.page ? ` · page ${page.page}` : ""}`;
       const label = span(text);
       const caption = document.createElement("figcaption");
-      if (page?.dataUrl) {
+      if (thumbnail) {
         const image = document.createElement("img");
-        image.src = page.dataUrl;
+        image.src = thumbnail;
         image.loading = "lazy";
         image.alt = text;
         image.draggable = false;
-        image.addEventListener("click", () => this.openViewer(page.dataUrl, text));
+        image.addEventListener("click", () => void this.openViewer(capture, text).catch((error) => this.showError(error)));
         figure.append(image);
-        caption.append(label);
       } else {
         figure.classList.add("gone");
-        label.textContent = `${text} — missing from storage`;
-        caption.append(label);
+        label.textContent = `${text} — ${page?.dataUrl ? "preview unavailable" : "missing from storage"}`;
       }
       const mark = span(this.recognised.has(capture.index) ? "text" : "", "text");
       const { box: asImage, control } = this.imageBox(capture);
       const remove = this.deleteButton(capture.index, figure);
-      caption.append(mark, control, remove);
+      caption.append(label, mark, control, remove);
       figure.append(caption);
       this.tiles.set(capture.index, {
         figure,
         label,
-        text,
+        text: label.textContent ?? text,
         mark,
         asImage,
         remove,
@@ -1626,7 +1780,11 @@ ${xref}
     if (mine !== generation) return;
     for await (const batch of pagesInBatches(book, meta.captures)) {
       if (mine !== generation) return;
-      for (const { capture, page } of batch) grid.append(capture, page);
+      for (const { capture, page } of batch) {
+        const thumbnail = page?.dataUrl ? await thumbnailUrl(page.dataUrl) : void 0;
+        if (mine !== generation || !grid.captures.length) return;
+        grid.append(capture, page, thumbnail);
+      }
       grid.refresh();
     }
   }

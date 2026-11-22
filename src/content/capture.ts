@@ -1,4 +1,10 @@
+import { encodePng, pngDataUrl } from '../shared/png.ts';
+
 const DEFAULT_BACKGROUND = '#ffffff';
+
+// Lossless rides on the quality number so it is pinned per book by the same rule
+// that stops one book holding pages encoded two ways.
+export const LOSSLESS_QUALITY = 1;
 const DECODE_TIMEOUT = 3000;
 
 // Only images at least this wide are candidates for splitting.
@@ -119,7 +125,7 @@ function hasCenterGutter(pixels: Uint8ClampedArray): boolean {
   return hasContent;
 }
 
-// The signature depends on the sampled source pixels, so JPEG quality does
+// The signature depends on the sampled source pixels, so the encoding does
 // not affect it. Keep the hash identical for regions already held in storage.
 function signatureOf(region: Region, pixels: Uint8ClampedArray | null): string | null {
   if (!pixels) return null;
@@ -157,9 +163,9 @@ function splitViews(element: PageElement, width: number, height: number): Region
   }));
 }
 
-export function renderRegion(
+export async function renderRegion(
   element: PageElement, region: Region, quality: number
-): CapturedPage | null {
+): Promise<CapturedPage | null> {
   const { sx, sy, sw, sh } = region;
   const canvas = document.createElement('canvas');
   canvas.width = sw;
@@ -172,5 +178,9 @@ export function renderRegion(
   context.fillStyle = /^#[0-9a-f]{3,8}$/i.test(background || '') ? background! : DEFAULT_BACKGROUND;
   context.fillRect(0, 0, sw, sh);
   context.drawImage(element, sx, sy, sw, sh, 0, 0, sw, sh);
+  if (quality >= LOSSLESS_QUALITY) {
+    const pixels = context.getImageData(0, 0, sw, sh).data;
+    return { width: sw, height: sh, dataUrl: pngDataUrl(await encodePng(pixels, sw, sh)) };
+  }
   return { width: sw, height: sh, dataUrl: canvas.toDataURL('image/jpeg', quality) };
 }

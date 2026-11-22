@@ -28,17 +28,15 @@
       button:disabled { opacity: .45; cursor: default; }
       button[hidden] { display: none; }
       #ocrStatus { opacity: .8; }
-      /* Saving is what this page is for once the pages are in order, so it sits
-         at the end of the header rather than in the flow of the grid: the header
-         is sticky, so it stays reachable however far down the book you are. */
       .save {
-        margin-left: auto; display: flex; gap: 10px; align-items: center; font-size: 13px;
+        margin-left: auto; display: flex; flex-wrap: wrap; max-width: 100%; gap: 10px; align-items: center; font-size: 13px;
         /* The header aligns its row on the h1's baseline, which a box of
            controls does not have a sensible one of. */
         align-self: center;
       }
-      .save select { font: inherit; padding: 3px 4px; }
-      .save label { display: flex; gap: 6px; align-items: center; opacity: .8; }
+      .save select, .save input { font: inherit; padding: 3px 4px; }
+      #fileName { width: 16em; min-width: 0; }
+      .save label { min-width: 0; max-width: 100%; display: flex; gap: 6px; align-items: center; opacity: .8; }
       #save { font-weight: 600; }
       #saveStatus { opacity: .8; }
       /* The one irreversible thing on the page, so it is kept away from Save and
@@ -103,6 +101,10 @@
             <option value="letter">US Letter</option>
             <option value="native">Match capture</option>
           </select>
+        </label>
+        <label>
+          File name
+          <input id="fileName" type="text" spellcheck="false" autocomplete="off" maxlength="200">
         </label>
         <button id="save" type="button">Save PDF</button>
         <button id="saveText" type="button">Save text PDF</button>

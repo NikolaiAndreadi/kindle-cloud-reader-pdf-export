@@ -17,6 +17,7 @@ export const ui = {
   ocrStop: required<HTMLButtonElement>('ocrStop'),
   ocrStatus: required('ocrStatus'),
   paper: required<HTMLSelectElement>('paper'),
+  fileName: required<HTMLInputElement>('fileName'),
   save: required<HTMLButtonElement>('save'),
   saveText: required<HTMLButtonElement>('saveText'),
   saveStatus: required('saveStatus'),

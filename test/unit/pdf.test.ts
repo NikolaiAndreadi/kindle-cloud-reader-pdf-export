@@ -2,11 +2,16 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { bytesFromDataUrl, pdfBuilder } from '../../src/pdf/builder.ts';
+import { encodePng } from '../../src/shared/png.ts';
 
 const text = async (blob: Blob): Promise<string> =>
   new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
 
-const jpeg = (n: number): Uint8Array => Uint8Array.from({ length: n }, (_, i) => i % 256);
+function jpeg(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  bytes.set([0xff, 0xd8, 0xff, 0xe0]);
+  return bytes;
+}
 
 const word = (t: string, x0: number, y0: number, x1: number, y1: number): OcrWord =>
   ({ t, x0, y0, x1, y1 });
@@ -23,6 +28,7 @@ describe('bytesFromDataUrl', () => {
 
   it('returns null for something that is not a data URL', () => {
     assert.equal(bytesFromDataUrl('blob:https://read.amazon.com/abc'), null);
+    assert.equal(bytesFromDataUrl('data:image/png;base64,???'), null);
   });
 });
 
@@ -70,6 +76,24 @@ describe('pdfBuilder', () => {
     const body = await text(builder.finish());
     assert.ok(body.includes('/Filter /DCTDecode /Length 37'));
     assert.ok(body.includes('/Width 640 /Height 480'));
+  });
+
+  it('embeds a lossless page as its PNG data under FlateDecode with PNG predictors', async () => {
+    const png = await encodePng(new Uint8ClampedArray(6 * 4 * 4).fill(128), 6, 4);
+    const builder = pdfBuilder();
+    assert.equal(builder.addPage({ width: 6, height: 4, bytes: png }), true);
+    const body = await text(builder.finish());
+    assert.ok(!body.includes('/DCTDecode'));
+    assert.match(body, /\/Width 6 \/Height 4 \/ColorSpace \/DeviceRGB \/BitsPerComponent 8 \/Filter \/FlateDecode \/DecodeParms << \/Predictor 15 \/Colors 3 \/BitsPerComponent 8 \/Columns 6 >> \/Length \d+/);
+    assert.ok(body.includes('stream\n\x78'));
+  });
+
+  it('refuses a scanned page whose PNG it cannot embed', async () => {
+    const alpha = await encodePng(new Uint8ClampedArray(4 * 4 * 4), 4, 4);
+    alpha[8 + 8 + 9] = 6; // IHDR colour type → RGBA
+    const builder = pdfBuilder();
+    assert.equal(builder.addPage({ width: 4, height: 4, bytes: alpha }), false);
+    assert.equal(builder.pages, 0);
   });
 
   it('defaults to A4 pages with the bitmap fitted and centred', async () => {

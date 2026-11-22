@@ -1,6 +1,6 @@
 import { scanRunning } from '../shared/scanning.ts';
 import {
-  deleteCapture, fingerprintCounts, recognisedIndexes, reorderCaptures, setCaptureAsImage
+  deleteCapture, fingerprintCounts, loadPageBatch, recognisedIndexes, reorderCaptures, setCaptureAsImage
 } from '../shared/storage.ts';
 import { EMPTY_TEXT, message, plural, span, ui } from './elements.ts';
 
@@ -24,6 +24,26 @@ interface Tile {
   size: string | null;
 }
 
+export async function thumbnailUrl(dataUrl: string): Promise<string | undefined> {
+  const image = new Image();
+  image.src = dataUrl;
+  try {
+    await image.decode();
+    const scale = Math.min(1, 320 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext('2d');
+    if (!context) return undefined;
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', .8);
+  } catch {
+    return undefined;
+  } finally {
+    image.removeAttribute('src');
+  }
+}
+
 export class PreviewGrid {
   private readonly book: string;
   private records: CaptureRecord[] = [];
@@ -41,6 +61,7 @@ export class PreviewGrid {
     this.book = book;
     ui.lock.textContent = LOCK_TEXT;
     ui.viewer.addEventListener('click', () => ui.viewer.close());
+    ui.viewer.addEventListener('close', () => ui.viewerImage.removeAttribute('src'));
     this.bindDragging();
   }
 
@@ -87,8 +108,8 @@ export class PreviewGrid {
     ui.grid.replaceChildren();
   }
 
-  append(capture: CaptureRecord, page: StoredPage | undefined): void {
-    ui.grid.append(this.createTile(capture, page));
+  append(capture: CaptureRecord, page: StoredPage | undefined, thumbnail: string | undefined): void {
+    ui.grid.append(this.createTile(capture, page, thumbnail));
   }
 
   async refreshRecognised(): Promise<void> {
@@ -168,10 +189,12 @@ export class PreviewGrid {
     this.onChange();
   }
 
-  private openViewer(dataUrl: string, label: string): void {
-    ui.viewerImage.src = dataUrl;
+  private async openViewer(capture: CaptureRecord, label: string): Promise<void> {
+    const page = (await loadPageBatch(this.book, [capture])).get(capture.index);
+    if (!page?.dataUrl) throw new Error(`Capture #${capture.index} is missing from storage.`);
+    ui.viewerImage.src = page.dataUrl;
     ui.viewerImage.alt = label;
-    ui.viewer.showModal();
+    if (!ui.viewer.open) ui.viewer.showModal();
   }
 
   private disarm(): void {
@@ -294,7 +317,7 @@ export class PreviewGrid {
     }
   }
 
-  private createTile(capture: CaptureRecord, page: StoredPage | undefined): HTMLElement {
+  private createTile(capture: CaptureRecord, page: StoredPage | undefined, thumbnail: string | undefined): HTMLElement {
     const figure = document.createElement('figure');
     figure.draggable = !this.editLocked;
     figure.dataset.index = String(capture.index);
@@ -303,32 +326,27 @@ export class PreviewGrid {
     const label = span(text);
     const caption = document.createElement('figcaption');
 
-    if (page?.dataUrl) {
+    if (thumbnail) {
       const image = document.createElement('img');
-      image.src = page.dataUrl;
+      image.src = thumbnail;
       image.loading = 'lazy';
       image.alt = text;
-      // Images drag themselves by default, which would take the drag away from
-      // the figure and reorder nothing.
+      // Let the parent figure handle dragging.
       image.draggable = false;
-      image.addEventListener('click', () => this.openViewer(page.dataUrl, text));
+      image.addEventListener('click', () => void this.openViewer(capture, text).catch((error) => this.showError(error)));
       figure.append(image);
-      // The pixel size is not per page — one book is captured at one size — so
-      // it is reported once in the header rather than under every tile.
-      caption.append(label);
     } else {
       figure.classList.add('gone');
-      label.textContent = `${text} — missing from storage`;
-      caption.append(label);
+      label.textContent = `${text} — ${page?.dataUrl ? 'preview unavailable' : 'missing from storage'}`;
     }
 
     const mark = span(this.recognised.has(capture.index) ? 'text' : '', 'text');
     const { box: asImage, control } = this.imageBox(capture);
     const remove = this.deleteButton(capture.index, figure);
-    caption.append(mark, control, remove);
+    caption.append(label, mark, control, remove);
     figure.append(caption);
     this.tiles.set(capture.index, {
-      figure, label, text, mark, asImage, remove,
+      figure, label, text: label.textContent ?? text, mark, asImage, remove,
       fingerprint: capture.fingerprint,
       size: page?.width && page.height ? `${page.width}×${page.height}` : null
     });

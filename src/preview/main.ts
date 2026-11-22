@@ -2,7 +2,7 @@ import { scanRunning } from '../shared/scanning.ts';
 import { loadMeta, pagesInBatches } from '../shared/storage.ts';
 import { BookActions } from './actions.ts';
 import { EMPTY_TEXT, message, ui } from './elements.ts';
-import { PreviewGrid } from './grid.ts';
+import { PreviewGrid, thumbnailUrl } from './grid.ts';
 import { OcrController } from './ocr.ts';
 
 /**
@@ -50,7 +50,11 @@ async function load(): Promise<void> {
 
   for await (const batch of pagesInBatches(book, meta.captures)) {
     if (mine !== generation) return;
-    for (const { capture, page } of batch) grid.append(capture, page);
+    for (const { capture, page } of batch) {
+      const thumbnail = page?.dataUrl ? await thumbnailUrl(page.dataUrl) : undefined;
+      if (mine !== generation || !grid.captures.length) return;
+      grid.append(capture, page, thumbnail);
+    }
     // refresh, not setMeta: a page deleted while the batches are still arriving
     // has already left the grid's own list, and this meta predates it.
     grid.refresh();

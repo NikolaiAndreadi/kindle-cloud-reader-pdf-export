@@ -1,5 +1,5 @@
 import {
-  loadMeta, loadOcrBatch, loadPageBatch, ocrInBatches, pagesInBatches
+  BITMAP_BATCH, loadMeta, loadOcrBatch, loadPageBatch, ocrInBatches, pagesInBatches
 } from '../shared/storage.ts';
 import { bytesFromDataUrl, pdfBuilder } from './builder.ts';
 import { paperLabel } from './paper.ts';
@@ -21,6 +21,38 @@ export interface SaveOptions {
   paper: PaperName;
   /** Which of the two exports the preview page asked for — one button each. */
   mode: PdfMode;
+  fileName?: string;
+}
+
+const MAX_BASE_BYTES = 150; // Leaves room for "-text.pdf" within a 255-byte filename.
+const RESERVED = '<>:"/\\|?*';
+
+export function cleanFileName(name: string): string {
+  const replaced = [...name]
+    .map((ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 || RESERVED.includes(ch) ? ' ' : ch))
+    .join('');
+  const cleaned = replaced
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\.pdf$/i, '')
+    .replace(/^[.\s]+|[.\s]+$/g, '');
+  const encoder = new TextEncoder();
+  let base = '';
+  let bytes = 0;
+  for (const ch of cleaned) {
+    bytes += encoder.encode(ch).length;
+    if (bytes > MAX_BASE_BYTES) break;
+    base += ch;
+  }
+  return base.replace(/[.\s]+$/g, '');
+}
+
+export const defaultFileName = (book: string, date: string): string => `kindle-${book}-${date}`;
+
+export function pdfFileName(book: string, mode: PdfMode, name: string | undefined, date: string): string {
+  const suffix = mode === 'text' ? '-text' : '';
+  const custom = cleanFileName(name ?? '');
+  return custom ? `${custom}${suffix}.pdf` : `kindle-${book}${suffix}-${date}.pdf`;
 }
 
 /** What a writer has to say afterwards, beyond the pages it handed the builder. */
@@ -56,7 +88,7 @@ export async function saveCachedPdf(
   }
 
   const date = new Date().toISOString().slice(0, 10);
-  download(builder.finish(), `kindle-${book}${mode === 'text' ? '-text' : ''}-${date}.pdf`);
+  download(builder.finish(), pdfFileName(book, mode, options.fileName, date));
 
   const notes = [`${paperLabel(options.paper)} pages`];
   // In text mode the count is worth giving even when it is low: the pages it
@@ -91,10 +123,11 @@ async function writeScannedPages(
       // Boxes measured on a differently-sized bitmap would land in the wrong
       // place, which is worse than having no text layer on that page.
       const usable = words && words.width === page.width && words.height === page.height;
-      builder.addPage(
+      const written = builder.addPage(
         { width: page.width, height: page.height, bytes },
         usable ? words.words : undefined
       );
+      if (!written) unreadable += 1;
     }
     builder.flush();
     report(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);
@@ -105,40 +138,19 @@ async function writeScannedPages(
 const sizeOf = (record: { width: number; height: number } | undefined): PdfPage | undefined =>
   record?.width && record.height ? { width: record.width, height: record.height } : undefined;
 
-/**
- * The words alone, on empty sheets. Bitmaps are read only for the pages that
- * have no words, which is most of why this export is both quicker and a fraction
- * of the size — and why it can only carry what OCR has been over. A recognised
- * page that came out with no words, and a page that was never recognised at all,
- * both become a blank sheet rather than disappearing: page numbering is the one
- * thing a reader can check against the book.
- */
+// Preserve page numbering even when OCR has no words for a sheet.
 async function writeTextPages(
   book: string, meta: BookMeta, builder: PdfBuilder, report: (text: string) => void
 ): Promise<WriteResult> {
   let recognised = 0;
   let unreadable = 0;
-  /**
-   * The last size seen, for a page that has neither words nor a stored bitmap to
-   * be measured from. Nothing else knows how big it was — the index records the
-   * capture, not its dimensions — so a neighbour is the only answer available.
-   */
   let previous: PdfPage | undefined;
-  /**
-   * Blank pages held back because nothing has reported a size yet. Only the run
-   * of them before the first measurable page: after that `previous` answers.
-   */
+  // Leading blank sheets use the first known page size.
   let waiting = 0;
 
-  for await (const batch of ocrInBatches(book, meta.captures)) {
-    // Two reasons to want a page record here, and both are the exception rather
-    // than the rule — which is what keeps this export off the data URLs.
-    //
-    // A page kept as a picture needs its bitmap, obviously. A page OCR cannot
-    // measure needs its dimensions: a capture size is per page, not per book —
-    // split mode leaves a landscape spread landscape, and the reader repaints at
-    // whatever size the window is when a later session resumes — so borrowing a
-    // neighbour's would turn the sheet sideways on native paper.
+  for await (const batch of ocrInBatches(book, meta.captures, BITMAP_BATCH)) {
+    // Pages without OCR still need their own size: split mode and window resizes
+    // make sizes vary per page, so a neighbour's could turn a sheet sideways.
     const wanted = batch
       .filter(({ capture, ocr }) => capture.asImage || !sizeOf(ocr))
       .map(({ capture }) => capture);
@@ -162,10 +174,6 @@ async function writeTextPages(
         continue;
       }
 
-      // Handing over bytes is what tells the writer to keep this page as a
-      // picture, so they are fetched for the flagged pages and nothing else.
-      // Words measured on another size would land wrong over the bitmap, the
-      // same check the scanned export makes.
       const bytes = capture.asImage && stored?.dataUrl && sizeOf(stored)
         ? bytesFromDataUrl(stored.dataUrl) ?? undefined
         : undefined;
@@ -175,10 +183,11 @@ async function writeTextPages(
 
       previous = bytes ? sizeOf(stored) ?? size : size;
       for (; waiting > 0; waiting--) builder.addPage(previous);
+      const imagesBefore = builder.imagePages;
       builder.addPage(bytes ? { ...previous, bytes } : previous,
         placeable ? measured?.words : undefined);
       if (measured) recognised += 1;
-      if (capture.asImage && !bytes) unreadable += 1;
+      if (capture.asImage && builder.imagePages === imagesBefore) unreadable += 1;
     }
     builder.flush();
     report(`Preparing PDF · ${builder.pages} of ${meta.captures.length} pages…`);
@@ -187,8 +196,5 @@ async function writeTextPages(
   if (!recognised) {
     return { blocked: 'No recognised text in this book yet — run "Add searchable text (OCR)" first.' };
   }
-  // Only reachable if every page was missing from storage, which the check above
-  // has already turned away — but the sheets are owed either way.
-  for (; waiting > 0 && previous; waiting--) builder.addPage(previous);
   return { unreadable };
 }

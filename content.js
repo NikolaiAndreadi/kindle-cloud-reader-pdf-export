@@ -280,8 +280,123 @@
   }
   var jitteredDelay = (base, level, roll = Math.random()) => Math.round(base * (1 + JITTER_SHARE * level * roll));
 
+  // src/shared/png.ts
+  var SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+  var COLOR_RGB = 2;
+  var crcTable = null;
+  function crc32(bytes, start, end) {
+    if (!crcTable) {
+      crcTable = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) {
+        let c2 = n;
+        for (let k = 0; k < 8; k++) c2 = c2 & 1 ? 3988292384 ^ c2 >>> 1 : c2 >>> 1;
+        crcTable[n] = c2 >>> 0;
+      }
+    }
+    let c = 4294967295;
+    for (let i = start; i < end; i++) c = crcTable[(c ^ bytes[i]) & 255] ^ c >>> 8;
+    return (c ^ 4294967295) >>> 0;
+  }
+  function chunk(type, data) {
+    const out = new Uint8Array(12 + data.length);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, data.length);
+    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+    out.set(data, 8);
+    view.setUint32(8 + data.length, crc32(out, 4, 8 + data.length));
+    return out;
+  }
+  var weight = (value) => {
+    const byte = value & 255;
+    return byte < 128 ? byte : 256 - byte;
+  };
+  function paeth(a, b, c) {
+    const p = a + b - c;
+    const pa = Math.abs(p - a);
+    const pb = Math.abs(p - b);
+    const pc = Math.abs(p - c);
+    return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+  }
+  async function filterRows(rgba, width, height) {
+    const stride = width * 3;
+    const out = new Uint8Array(height * (stride + 1));
+    let previous = new Uint8Array(stride);
+    let row = new Uint8Array(stride);
+    let sliceStart = performance.now();
+    for (let y = 0; y < height; y++) {
+      if (performance.now() - sliceStart >= 8) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        sliceStart = performance.now();
+      }
+      for (let x = 0, source = y * width * 4; x < stride; x += 3, source += 4) {
+        row[x] = rgba[source];
+        row[x + 1] = rgba[source + 1];
+        row[x + 2] = rgba[source + 2];
+      }
+      const scores = [0, 0, 0, 0, 0];
+      for (let i = 0; i < stride; i++) {
+        const value = row[i];
+        const a = i >= 3 ? row[i - 3] : 0;
+        const b = previous[i];
+        const c = i >= 3 ? previous[i - 3] : 0;
+        scores[0] += weight(value);
+        scores[1] += weight(value - a);
+        scores[2] += weight(value - b);
+        scores[3] += weight(value - (a + b >> 1));
+        scores[4] += weight(value - paeth(a, b, c));
+      }
+      let filter = 0;
+      for (let f = 1; f < 5; f++) if (scores[f] < scores[filter]) filter = f;
+      let o = y * (stride + 1);
+      out[o++] = filter;
+      for (let i = 0; i < stride; i++, o++) {
+        const value = row[i];
+        const a = i >= 3 ? row[i - 3] : 0;
+        const b = previous[i];
+        const c = i >= 3 ? previous[i - 3] : 0;
+        const predicted = filter === 0 ? 0 : filter === 1 ? a : filter === 2 ? b : filter === 3 ? a + b >> 1 : paeth(a, b, c);
+        out[o] = value - predicted & 255;
+      }
+      [previous, row] = [row, previous];
+    }
+    return out;
+  }
+  async function deflate(data) {
+    const stream = new Blob([data]).stream().pipeThrough(new CompressionStream("deflate"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  async function encodePng(rgba, width, height) {
+    const header = new Uint8Array(13);
+    const view = new DataView(header.buffer);
+    view.setUint32(0, width);
+    view.setUint32(4, height);
+    header[8] = 8;
+    header[9] = COLOR_RGB;
+    const parts = [
+      Uint8Array.from(SIGNATURE),
+      chunk("IHDR", header),
+      chunk("IDAT", await deflate(await filterRows(rgba, width, height))),
+      chunk("IEND", new Uint8Array(0))
+    ];
+    const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+    let offset = 0;
+    for (const part of parts) {
+      out.set(part, offset);
+      offset += part.length;
+    }
+    return out;
+  }
+  function pngDataUrl(bytes) {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 32768) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+    }
+    return `data:image/png;base64,${btoa(binary)}`;
+  }
+
   // src/content/capture.ts
   var DEFAULT_BACKGROUND = "#ffffff";
+  var LOSSLESS_QUALITY = 1;
   var DECODE_TIMEOUT = 3e3;
   var SPREAD_ASPECT = 1.2;
   var SIGNATURE_SIDE = 128;
@@ -394,7 +509,7 @@
       signature: signatureOf(region, samplePixels(element, region))
     }));
   }
-  function renderRegion(element, region, quality) {
+  async function renderRegion(element, region, quality) {
     const { sx, sy, sw, sh } = region;
     const canvas = document.createElement("canvas");
     canvas.width = sw;
@@ -405,6 +520,10 @@
     context.fillStyle = /^#[0-9a-f]{3,8}$/i.test(background || "") ? background : DEFAULT_BACKGROUND;
     context.fillRect(0, 0, sw, sh);
     context.drawImage(element, sx, sy, sw, sh, 0, 0, sw, sh);
+    if (quality >= LOSSLESS_QUALITY) {
+      const pixels = context.getImageData(0, 0, sw, sh).data;
+      return { width: sw, height: sh, dataUrl: pngDataUrl(await encodePng(pixels, sw, sh)) };
+    }
     return { width: sw, height: sh, dataUrl: canvas.toDataURL("image/jpeg", quality) };
   }
 
@@ -515,6 +634,11 @@
   var QUALITY_MIN = 0.6;
   var QUALITY_MAX = 0.98;
   var QUALITY_DEFAULT = 0.88;
+  function clampQuality(value) {
+    const quality = Number(value);
+    if (quality === LOSSLESS_QUALITY) return LOSSLESS_QUALITY;
+    return Math.min(QUALITY_MAX, Math.max(QUALITY_MIN, quality || QUALITY_DEFAULT));
+  }
   var SETTLE_RATIO = 0.7;
   var wait2 = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   var plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -535,7 +659,7 @@
     return {
       delay: clampDelay(options?.delay),
       jitter: clampJitter(options?.jitter),
-      quality: Math.min(QUALITY_MAX, Math.max(QUALITY_MIN, Number(options?.quality) || QUALITY_DEFAULT)),
+      quality: clampQuality(options?.quality),
       split: options?.split !== false
     };
   }
@@ -572,8 +696,8 @@
     if (meta.split !== settings.split) {
       throw new Error("The split setting differs from this cache. Clear the cached pages before changing it.");
     }
-    if (meta.quality === null) meta.quality = settings.quality;
-    else settings.quality = meta.quality;
+    meta.quality ??= settings.quality === LOSSLESS_QUALITY ? QUALITY_DEFAULT : settings.quality;
+    settings.quality = meta.quality;
   }
   async function captureRendered(meta, candidates, known, settings, position, startIndex) {
     const key = positionKey(position);
@@ -598,7 +722,7 @@
         }
         let image = null;
         try {
-          image = renderRegion(candidate.element, view.region, settings.quality);
+          image = await renderRegion(candidate.element, view.region, settings.quality);
         } catch (error) {
           console.warn("Could not copy a rendered page", error);
         }

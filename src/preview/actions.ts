@@ -1,7 +1,7 @@
-import { saveCachedPdf } from '../pdf/export.ts';
+import { defaultFileName, saveCachedPdf } from '../pdf/export.ts';
 import { DEFAULT_PAPER, isPaperName } from '../pdf/paper.ts';
 import { scanRunning } from '../shared/scanning.ts';
-import { clearBook, loadPaper, savePaper } from '../shared/storage.ts';
+import { clearBook, loadFileName, loadPaper, saveFileName, savePaper } from '../shared/storage.ts';
 import { EMPTY_TEXT, message, plural, ui } from './elements.ts';
 import type { PreviewGrid } from './grid.ts';
 
@@ -33,6 +33,16 @@ export class BookActions {
     });
     ui.paper.addEventListener('change', () => {
       if (isPaperName(ui.paper.value)) void savePaper(ui.paper.value);
+    });
+
+    ui.fileName.placeholder = defaultFileName(book, new Date().toISOString().slice(0, 10));
+    let nameEdited = false;
+    void loadFileName(book).then((name) => {
+      if (!nameEdited) ui.fileName.value = name;
+    });
+    ui.fileName.addEventListener('input', () => {
+      nameEdited = true;
+      void saveFileName(book, ui.fileName.value).catch((error) => grid.showError(error));
     });
 
     // An export interrupted halfway leaves no file and no sign of why.
@@ -80,7 +90,8 @@ export class BookActions {
     this.describe();
     try {
       const paper = isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
-      const result = await saveCachedPdf(this.book, { paper, mode }, (text) => {
+      const fileName = ui.fileName.value;
+      const result = await saveCachedPdf(this.book, { paper, mode, fileName }, (text) => {
         ui.saveStatus.textContent = text;
       });
       ui.saveStatus.textContent = result.message;

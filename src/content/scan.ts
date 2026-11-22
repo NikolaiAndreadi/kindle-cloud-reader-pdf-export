@@ -1,7 +1,7 @@
 import { META_FLUSH_EVERY, loadMeta, nextIndex, saveMeta, storePage } from '../shared/storage.ts';
 import { clampDelay, clampJitter, jitteredDelay } from '../shared/timing.ts';
 import { bookId, pageCandidates, positionKey, readerPosition } from './dom.ts';
-import { fingerprintOf, renderRegion, viewsOf } from './capture.ts';
+import { LOSSLESS_QUALITY, fingerprintOf, renderRegion, viewsOf } from './capture.ts';
 import type { SplitMode } from './capture.ts';
 import { notify, removeNoticeLater } from './notice.ts';
 import { turnProber } from './turning.ts';
@@ -21,6 +21,12 @@ const REVISIT_LIMIT = 10;
 const QUALITY_MIN = .6;
 const QUALITY_MAX = .98;
 const QUALITY_DEFAULT = .88;
+
+function clampQuality(value: unknown): number {
+  const quality = Number(value);
+  if (quality === LOSSLESS_QUALITY) return LOSSLESS_QUALITY;
+  return Math.min(QUALITY_MAX, Math.max(QUALITY_MIN, quality || QUALITY_DEFAULT));
+}
 
 // How much of the configured delay to wait before looking at the page, as
 // opposed to after turning it.
@@ -69,7 +75,7 @@ export function settingsFrom(options: ScanOptions | undefined): Settings {
   return {
     delay: clampDelay(options?.delay),
     jitter: clampJitter(options?.jitter),
-    quality: Math.min(QUALITY_MAX, Math.max(QUALITY_MIN, Number(options?.quality) || QUALITY_DEFAULT)),
+    quality: clampQuality(options?.quality),
     split: options?.split !== false
   };
 }
@@ -133,17 +139,15 @@ export function prepareBookMode(meta: BookMeta, settings: Settings): void {
   if (meta.split !== settings.split) {
     throw new Error('The split setting differs from this cache. Clear the cached pages before changing it.');
   }
-  // Quality only makes the pages uneven, so the cache quietly wins instead of
-  // blocking a resume. A cache from before it was recorded adopts what it is
-  // given, which pins it from this scan on.
-  if (meta.quality === null) meta.quality = settings.quality;
-  else settings.quality = meta.quality;
+  // Caches that predate the quality field contain JPEGs.
+  meta.quality ??= settings.quality === LOSSLESS_QUALITY ? QUALITY_DEFAULT : settings.quality;
+  settings.quality = meta.quality;
 }
 
 /**
  * Capture everything rendered right now. Regions already in `known` are skipped
  * before encoding, so resuming a book costs a downscale per view rather than a
- * full JPEG encode.
+ * full encode.
  */
 async function captureRendered(
   meta: BookMeta, candidates: PageCandidate[], known: Set<string>,
@@ -168,8 +172,6 @@ async function captureRendered(
       const isPrimary = offset === 0;
       if (isPrimary) primary = view.signature ?? '';
 
-      // Hashing the source pixels is cheap, so a view already captured costs
-      // nothing: the full JPEG encode only happens for something new.
       if (view.signature && known.has(view.signature)) {
         offset += 1;
         continue;
@@ -177,7 +179,7 @@ async function captureRendered(
 
       let image: CapturedPage | null = null;
       try {
-        image = renderRegion(candidate.element, view.region, settings.quality);
+        image = await renderRegion(candidate.element, view.region, settings.quality);
       } catch (error) {
         console.warn('Could not copy a rendered page', error);
       }
@@ -186,7 +188,6 @@ async function captureRendered(
         continue;
       }
 
-      // Falls back to hashing the JPEG when the source cannot be read back.
       const identity = view.signature ?? fingerprintOf(image.dataUrl, image.width, image.height);
       if (isPrimary) primary = identity;
 

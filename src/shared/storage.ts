@@ -6,6 +6,8 @@
 import { DEFAULT_PAPER, isPaperName } from '../pdf/paper.ts';
 
 export const READ_BATCH = 20;
+// Small because a lossless page can be several MB as a data URL.
+export const BITMAP_BATCH = 4;
 
 /**
  * How many captures may be written before the index is flushed. The index has
@@ -66,6 +68,20 @@ export async function loadPaper(): Promise<PaperName> {
 
 export const savePaper = (paper: PaperName): Promise<void> =>
   chrome.storage.local.set({ [PAPER_KEY]: paper });
+
+// Keep names outside the index so scan flushes cannot overwrite preview edits.
+const fileNameKey = (book: string): string => `book:${book}:filename`;
+
+export async function loadFileName(book: string): Promise<string> {
+  const key = fileNameKey(book);
+  const stored = (await chrome.storage.local.get(key))[key];
+  return typeof stored === 'string' ? stored : '';
+}
+
+export function saveFileName(book: string, name: string): Promise<void> {
+  const key = fileNameKey(book);
+  return name.trim() ? chrome.storage.local.set({ [key]: name }) : chrome.storage.local.remove(key);
+}
 
 export const emptyMeta = (book: string): BookMeta => ({
   version: 2,
@@ -132,7 +148,7 @@ export async function loadPageBatch(
 // Batched because neither the PDF writer nor the preview grid can afford every
 // data URL of a book in memory at once.
 export async function* pagesInBatches(
-  book: string, captures: CaptureRecord[], size = READ_BATCH
+  book: string, captures: CaptureRecord[], size = BITMAP_BATCH
 ): AsyncGenerator<{ capture: CaptureRecord; page: StoredPage | undefined }[]> {
   for (let start = 0; start < captures.length; start += size) {
     const batch = captures.slice(start, start + size);

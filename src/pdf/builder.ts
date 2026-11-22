@@ -1,10 +1,4 @@
-// A minimal PDF/1.4 container. In 'scan' mode each page is one JPEG, optionally
-// with an invisible OCR text layer over it; in 'text' mode the OCR words are the
-// page, except where the caller hands over a bitmap as well — a plate, a map, a
-// page the recogniser could make nothing of — which is drawn as a scan would be.
-// Nothing here knows about Kindle, storage or the DOM: it takes pages and
-// returns a Blob.
-
+import { readPng } from '../shared/png.ts';
 import { DEFAULT_PAPER, layoutFor } from './paper.ts';
 import { FONTS, textLayerOps } from './text.ts';
 
@@ -25,10 +19,38 @@ export function bytesFromDataUrl(dataUrl: string): Uint8Array | null {
   if (comma < 0) return null;
   // atob rather than fetch(dataUrl): a content script's fetch is subject to the
   // host page's CSP, and read.amazon.com sets a restrictive one.
-  const binary = atob(dataUrl.slice(comma + 1));
+  let binary: string;
+  try {
+    binary = atob(dataUrl.slice(comma + 1));
+  } catch {
+    return null;
+  }
+  if (!binary.length) return null;
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+interface ImageObject {
+  dict: string;
+  data: Uint8Array;
+}
+
+// Predictor 15 decodes PNG row filters directly from the IDAT stream.
+function imageObject(bytes: Uint8Array, width: number, height: number): ImageObject | null {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    return {
+      dict: `/Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode`,
+      data: bytes
+    };
+  }
+  const png = readPng(bytes);
+  if (!png) return null;
+  const space = png.colors === 1 ? '/DeviceGray' : '/DeviceRGB';
+  return {
+    dict: `/Width ${png.width} /Height ${png.height} /ColorSpace ${space} /BitsPerComponent 8 /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors ${png.colors} /BitsPerComponent 8 /Columns ${png.width} >>`,
+    data: png.data
+  };
 }
 
 /**
@@ -94,16 +116,12 @@ export function pdfBuilder(options: PdfOptions = {}): PdfBuilder {
       return withText;
     },
     flush,
-    addPage(page: PdfPage, words?: OcrWord[]): void {
+    addPage(page: PdfPage, words?: OcrWord[]): boolean {
       const layout = layoutFor(page.width, page.height, paper);
-      if (!layout) return;
-      // A bitmap is what a scanned page is, so one arriving without it is a page
-      // that could not be read. In text mode the bitmap is the exception rather
-      // than the rule — it means this page is a picture and is to be kept as one
-      // — and a page with neither bitmap nor words is still a page: a plate, a
-      // chapter break, so leaving it out would renumber everything after it.
-      const image = page.bytes;
-      if (mode !== 'text' && !image) return;
+      if (!layout) return false;
+      // Text exports keep the sheet and any OCR words when its picture is unreadable.
+      const image = page.bytes ? imageObject(page.bytes, page.width, page.height) : null;
+      if (mode !== 'text' && !image) return false;
       const style = image ? 'invisible' : 'visible';
 
       const index = pageIds.length;
@@ -119,8 +137,8 @@ export function pdfBuilder(options: PdfOptions = {}): PdfBuilder {
       if (image) {
         withImage += 1;
         offsets[imageId] = length;
-        push(`${imageId} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.length} >>\nstream\n`);
-        push(image);
+        push(`${imageId} 0 obj\n<< /Type /XObject /Subtype /Image ${image.dict} /Length ${image.data.length} >>\nstream\n`);
+        push(image.data);
         push('\nendstream\nendobj\n');
 
         // The image is drawn first so the text lands on top of it. Invisible text
@@ -142,6 +160,7 @@ export function pdfBuilder(options: PdfOptions = {}): PdfBuilder {
         withText += 1;
       }
       object(contentId, `<< /Length ${command.length} >>\nstream\n${command}endstream`);
+      return true;
     },
     finish(): Blob {
       object(CATALOG_ID, `<< /Type /Catalog /Pages ${PAGES_ID} 0 R >>`);

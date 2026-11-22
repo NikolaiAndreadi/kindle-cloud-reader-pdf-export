@@ -113,6 +113,9 @@
     if (state.split !== null) ui.split.checked = state.split;
     const choice = [...ui.quality.options].find((option) => Number(option.value) === state.quality);
     if (choice) ui.quality.value = choice.value;
+    else if (ui.quality.value === "1") {
+      ui.quality.selectedIndex = [...ui.quality.options].findIndex((option) => option.defaultSelected);
+    }
   }
   function scanButton(scanning2, ready) {
     ui.scan.textContent = scanning2 ? "Stop" : "Scan / resume";

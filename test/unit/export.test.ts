@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
-import { saveCachedPdf } from '../../src/pdf/export.ts';
+import { cleanFileName, pdfFileName, saveCachedPdf } from '../../src/pdf/export.ts';
 import { metaKey, ocrKey, pageKey } from '../../src/shared/storage.ts';
 
 /**
@@ -200,6 +200,18 @@ describe('saveCachedPdf in text mode', () => {
     assert.match(result.message, /1 page could not be read/);
   });
 
+  it('reports a rejected picture while preserving its blank sheet', async () => {
+    const flagged = meta(2);
+    flagged.captures[1]!.asImage = true;
+    put(metaKey(BOOK), flagged);
+    put(ocrKey(BOOK, 1, 'fp-1'), recognised(1, 800, 1200));
+    put(pageKey(BOOK, 2), { ...page(2, 800, 1200), dataUrl: 'data:image/png;base64,iVBORw0KGgo=' });
+
+    const result = await saveCachedPdf(BOOK, { paper: 'a4', mode: 'text' }, () => {});
+    assert.equal(mediaBoxes(await body(store.saved.blob)).length, 2);
+    assert.match(result.message, /1 page could not be read/);
+  });
+
   it('names the file apart from the scanned export', async () => {
     put(metaKey(BOOK), meta(1));
     put(ocrKey(BOOK, 1, 'fp-1'), recognised(1, 800, 1200));
@@ -235,5 +247,36 @@ describe('saveCachedPdf in scan mode', () => {
 
     await saveCachedPdf(BOOK, { paper: 'a4', mode: 'scan' }, () => {});
     assert.ok(!(await body(store.saved.blob)).includes('(word) Tj'));
+  });
+});
+
+describe('pdf file names', () => {
+  it('keeps the default when nothing usable was typed', () => {
+    assert.equal(pdfFileName(BOOK, 'scan', undefined, '2026-11-22'), 'kindle-B00TEST-2026-11-22.pdf');
+    assert.equal(pdfFileName(BOOK, 'text', '  ', '2026-11-22'), 'kindle-B00TEST-text-2026-11-22.pdf');
+    assert.equal(pdfFileName(BOOK, 'scan', '???', '2026-11-22'), 'kindle-B00TEST-2026-11-22.pdf');
+  });
+
+  it('uses a typed name, with the text suffix where it applies', () => {
+    assert.equal(pdfFileName(BOOK, 'scan', 'Moby Dick', '2026-11-22'), 'Moby Dick.pdf');
+    assert.equal(pdfFileName(BOOK, 'text', 'Moby Dick.pdf', '2026-11-22'), 'Moby Dick-text.pdf');
+  });
+
+  it('makes a name safe to save under', () => {
+    assert.equal(cleanFileName('  Author: Title / Vol. 2?  '), 'Author Title Vol. 2');
+    assert.equal(cleanFileName('..hidden.'), 'hidden');
+    assert.equal(cleanFileName('a\u0000b\tc'), 'a b c');
+    assert.equal(cleanFileName('Ünïcödé — 書名'), 'Ünïcödé — 書名');
+    assert.equal(cleanFileName('x'.repeat(400)).length, 150);
+    assert.equal(cleanFileName(`${'x'.repeat(149)}📚`), 'x'.repeat(149));
+    assert.equal(cleanFileName('書'.repeat(100)), '書'.repeat(50));
+  });
+
+  it('saves under the name it is given', async () => {
+    const store = harness();
+    store.data.set(metaKey(BOOK), meta(1));
+    store.data.set(pageKey(BOOK, 1), page(1, 800, 1200));
+    await saveCachedPdf(BOOK, { paper: 'a4', mode: 'scan', fileName: 'My Book' }, () => {});
+    assert.equal(store.saved.filename, 'My Book.pdf');
   });
 });
