@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 
@@ -50,5 +51,16 @@ describe('manifest.json', () => {
     assert.deepEqual(manifest.content_scripts[0].js, ['content.js']);
     assert.equal(manifest.action.default_popup, 'popup.html');
     assert.equal(manifest.background.service_worker, 'background.js');
+  });
+
+  // Without a key, an unpacked extension's ID comes from its folder path, so each
+  // release unzipped to a new folder gets fresh, empty storage and orphans the
+  // old cache (issue #3). Changing the key orphans every user's cache in the
+  // same way.
+  it('pins the extension ID', async () => {
+    const manifest = JSON.parse(await readFile(new URL('../../manifest.json', import.meta.url), 'utf8'));
+    const digest = createHash('sha256').update(Buffer.from(manifest.key, 'base64')).digest('hex');
+    const id = [...digest.slice(0, 32)].map((c) => String.fromCharCode(97 + parseInt(c, 16))).join('');
+    assert.equal(id, 'djlhepgbjnnhjkkefpodnojolgaelpeb');
   });
 });

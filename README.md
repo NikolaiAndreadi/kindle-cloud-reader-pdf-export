@@ -32,8 +32,11 @@ No git, npm or build needed.
 
 **Developer mode** has to stay on: Chrome installs packaged extensions from the
 Chrome Web Store and nowhere else, and this is
-[not published there on purpose](CONTRIBUTING.md). Updating means downloading a
-newer zip and repeating step 4.
+[not published there on purpose](CONTRIBUTING.md).
+
+To update, click **Remove** on the old version in `chrome://extensions`, then
+load the newer zip's folder as in step 4. Cached books carry over to the new
+version.
 
 Cloning the repository and running **Load unpacked** on the clone works exactly
 the same way. The bundles and the OCR engine are checked in. This is the way to

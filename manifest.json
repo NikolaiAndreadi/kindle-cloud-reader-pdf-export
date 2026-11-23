@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Personal Cloud Reader Export",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Export rendered pages from books you own in Kindle Cloud Reader to PDF.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAraBMF7NuritcE+v+8uoJFydU5jBZ1vCG8MH8TrX2lEElLh5wZ0rmYyHhi5pIz7K6sxvWE6ndRQNlS5GZjYCZlPN62HmQ1XmSGmfUI6pexwQaqJFx8Xst8N1xkEp1CoSo08fDS4/LFDHMMReLbn07nEWdN3xiEYcFXxkOw/WMl6J0EXV96XoS28dvHlsWH7lA8n82bhwJ//Ff97dclCBOa0fvfhs30DY8uy005+n5nS4qnYNY3sNKC7/fE/3erK2Ovs+L+gk/xtUVJr7omEMJ4aVxnscp41b6+xdQpSJl3MZlwAunOQ2jD8JT4FWtBGdJj9IULjzRl87h3vf+L2IoGQIDAQAB",
   "permissions": [
     "storage",
     "unlimitedStorage"
