@@ -210,10 +210,7 @@ interface BookState {
   quality: number | null;
 }
 
-interface BookNames { title: string; author: string }
-
 type ReaderRequest =
-  | { action: 'bookNames'; asin: string }
   | { action: 'startScan'; options?: ScanOptions }
   | { action: 'retune'; options?: ScanOptions }
   | { action: 'stopScan' }
@@ -230,7 +227,6 @@ interface ReaderFailure {
 }
 
 interface ReaderReplies {
-  bookNames: BookNames;
   startScan: ReaderMessage;
   retune: ReaderMessage;
   stopScan: ReaderMessage;

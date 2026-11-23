@@ -1,7 +1,6 @@
 import { countDuplicates, loadMeta, recognisedIndexes } from '../shared/storage.ts';
 import { acquireBookScan, releaseBookScan } from '../shared/scan-lock.ts';
 import { bookId, pageCandidates, readerPosition } from './dom.ts';
-import { lookupBookNames } from './library.ts';
 import { notify, removeNoticeLater } from './notice.ts';
 import { isRunning, requestStop, retune, scan } from './scan.ts';
 
@@ -65,19 +64,11 @@ async function startScan(book: string, options: ScanOptions | undefined): Promis
 chrome.runtime.onMessage.addListener((
   request: ReaderRequest,
   _sender: chrome.runtime.MessageSender,
-  sendResponse: (response: ReaderMessage | BookState | BookNames | ReaderFailure) => void
+  sendResponse: (response: ReaderMessage | BookState | ReaderFailure) => void
 ): boolean => {
   const book = bookId();
 
   switch (request.action) {
-    case 'bookNames':
-      if (request.asin !== book) {
-        sendResponse({ error: 'The open book changed.' });
-        return false;
-      }
-      lookupBookNames(book).then(sendResponse, () => sendResponse({ title: '', author: '' }));
-      return true;
-
     case 'startScan':
       startScan(book, request.options).then(
         sendResponse,

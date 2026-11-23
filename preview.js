@@ -833,6 +833,7 @@ ${xref}
     }
     return base.replace(/[.\s]+$/g, "");
   }
+  var defaultFileName = (book2, date) => `kindle-${book2}-${date}`;
   function pdfFileName(book2, mode, name, date) {
     const suffix = mode === "text" ? "-text" : "";
     const custom = cleanFileName(name ?? "");
@@ -942,11 +943,6 @@ ${xref}
     ocrStop: required("ocrStop"),
     ocrStatus: required("ocrStatus"),
     paper: required("paper"),
-    naming: required("naming"),
-    template: required("template"),
-    bookTitle: required("bookTitle"),
-    author: required("author"),
-    names: required("names"),
     fileName: required("fileName"),
     save: required("save"),
     saveText: required("saveText"),
@@ -963,90 +959,11 @@ ${xref}
     return node;
   }
 
-  // src/preview/naming.ts
-  function bindNaming(book2, showError) {
-    const local = chrome.storage.local;
-    const templateKey = "filenameTemplate";
-    const metadataKey = `book:${book2}:libraryNames`;
-    const fields = [
-      [ui.template, templateKey],
-      [ui.bookTitle, `book:${book2}:title`],
-      [ui.author, `book:${book2}:author`]
-    ];
-    let detected = { title: "", author: "" };
-    const edited = /* @__PURE__ */ new Set();
-    function name() {
-      const tokens = { asin: book2, title: ui.bookTitle.value || detected.title, author: ui.author.value || detected.author };
-      return ui.fileName.value.trim() || ui.template.value.replace(
-        /\{(asin|title|author)\}/g,
-        (_, key) => tokens[key]
-      );
-    }
-    function render() {
-      ui.bookTitle.placeholder = detected.title;
-      ui.author.placeholder = detected.author;
-      const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-      const scan = pdfFileName(book2, "scan", name(), date);
-      ui.fileName.placeholder = scan.slice(0, -4);
-      ui.names.textContent = `Scan: ${scan} · Text: ${pdfFileName(book2, "text", name(), date)}`;
-    }
-    function bind(input, write) {
-      input.addEventListener("input", () => {
-        edited.add(input);
-        render();
-        void write(input.value).catch(showError);
-      });
-    }
-    bind(ui.fileName, (value) => saveFileName(book2, value));
-    for (const [input, key] of fields) {
-      bind(input, (value) => value ? local.set({ [key]: value }) : local.remove(key));
-    }
-    const ready = Promise.all([
-      loadFileName(book2),
-      local.get([metadataKey, ...fields.map(([, key]) => key)])
-    ]).then(([override, stored]) => {
-      if (!edited.has(ui.fileName)) ui.fileName.value = override;
-      for (const [input, key] of fields) {
-        if (!edited.has(input) && typeof stored[key] === "string") input.value = stored[key];
-      }
-      const cached = stored[metadataKey];
-      if (typeof cached?.title === "string" && typeof cached.author === "string") detected = cached;
-      render();
-    }).catch(showError);
-    let pending;
-    async function lookup() {
-      await ready;
-      const tab = Number(new URLSearchParams(location.search).get("readerTab"));
-      if (!tab || detected.title && detected.author) return;
-      pending ??= chrome.tabs.sendMessage(tab, { action: "bookNames", asin: book2 }).then(async (result) => {
-        if (!result || "error" in result || !result.title && !result.author) return;
-        detected = { title: result.title || detected.title, author: result.author || detected.author };
-        render();
-        await local.set({ [metadataKey]: detected });
-      }).catch(() => {
-      });
-      await pending;
-    }
-    ui.naming.addEventListener("toggle", () => {
-      if (ui.naming.open) void lookup();
-    });
-    const needsLookup = () => !ui.fileName.value.trim() && /\{(title|author)\}/.test(ui.template.value);
-    void ready.then(() => {
-      if (needsLookup()) void lookup();
-    });
-    return async () => {
-      await ready;
-      if (needsLookup()) await lookup();
-      return name();
-    };
-  }
-
   // src/preview/actions.ts
   var HOLD_MS = 2e3;
   var BookActions = class {
     book;
     grid;
-    exportName;
     saving = false;
     ocrBusy = false;
     constructor(book2, grid2) {
@@ -1061,7 +978,15 @@ ${xref}
       ui.paper.addEventListener("change", () => {
         if (isPaperName(ui.paper.value)) void savePaper(ui.paper.value);
       });
-      this.exportName = bindNaming(book2, (error) => grid2.showError(error));
+      ui.fileName.placeholder = defaultFileName(book2, (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+      let nameEdited = false;
+      void loadFileName(book2).then((name) => {
+        if (!nameEdited) ui.fileName.value = name;
+      });
+      ui.fileName.addEventListener("input", () => {
+        nameEdited = true;
+        void saveFileName(book2, ui.fileName.value).catch((error) => grid2.showError(error));
+      });
       addEventListener("beforeunload", (event) => {
         if (this.saving) event.preventDefault();
       });
@@ -1094,7 +1019,7 @@ ${xref}
       this.describe();
       try {
         const paper = isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
-        const fileName = await this.exportName();
+        const fileName = ui.fileName.value;
         const result = await saveCachedPdf(this.book, { paper, mode, fileName }, (text) => {
           ui.saveStatus.textContent = text;
         });
