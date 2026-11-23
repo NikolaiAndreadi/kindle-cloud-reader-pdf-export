@@ -37,6 +37,10 @@
       .save select, .save input { font: inherit; padding: 3px 4px; }
       #fileName { width: 16em; min-width: 0; }
       .save label { min-width: 0; max-width: 100%; display: flex; gap: 6px; align-items: center; opacity: .8; }
+      #naming { flex-basis: 100%; font-size: 13px; }
+      #naming summary { cursor: pointer; }
+      #naming label { display: inline-block; margin: 6px 8px 6px 0; }
+      #names { overflow-wrap: anywhere; }
       #save { font-weight: 600; }
       #saveStatus { opacity: .8; }
       /* The one irreversible thing on the page, so it is kept away from Save and
@@ -109,6 +113,14 @@
         <button id="save" type="button">Save PDF</button>
         <button id="saveText" type="button">Save text PDF</button>
       </div>
+      <details id="naming">
+        <summary>Filename builder</summary>
+        <label>Template for all books <input id="template" placeholder="{asin} {title} {author}"></label>
+        <small>Tokens: {asin}, {title}, {author}</small>
+        <label>Book title <input id="bookTitle"></label>
+        <label>Author <input id="author"></label>
+        <div><output id="names"></output></div>
+      </details>
       <span class="lock" id="lock" hidden></span>
       <div class="ocr">
         <button id="ocrStart" type="button">Add searchable text (OCR)</button>

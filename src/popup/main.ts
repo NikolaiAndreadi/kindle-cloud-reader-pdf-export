@@ -105,8 +105,11 @@ onClick(ui.open, async () => {
 
 onClick(ui.preview, async () => {
   if (!currentBook) return null;
+  const params = new URLSearchParams({ book: currentBook });
+  const tab = await activeTab();
+  if (tab?.id) params.set('readerTab', String(tab.id));
   await chrome.tabs.create({
-    url: `${chrome.runtime.getURL('preview.html')}?book=${encodeURIComponent(currentBook)}`
+    url: `${chrome.runtime.getURL('preview.html')}?${params}`
   });
   window.close();
   return null;

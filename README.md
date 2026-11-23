@@ -107,6 +107,11 @@ By default, the scan downloads as `kindle-<book id>-<date>.pdf` and the text PDF
 as `kindle-<book id>-text-<date>.pdf`. Enter a name in the **File name** box to
 save them as `<name>.pdf` and `<name>-text.pdf`. The preview remembers it for that book.
 
+Open **Filename builder** to set a shared template such as `{author} - {title} ({asin})`.
+The builder looks up the open book in your signed-in Kindle library and previews
+both download names. You can fill in missing details or override the detected
+title and author per book. A per-book **File name** overrides the template.
+
 ## When it stops working
 
 Expect it to. Kindle Cloud Reader is not a stable target and Amazon has no reason
@@ -166,8 +171,9 @@ It does not do any of the following, and there is no code here that could:
 - decrypt anything, extract or derive a key, or interact with DRM at all
 - bypass a paywall, a licence check, a lending expiry or a device limit
 - give access to a book the signed-in account cannot already read
-- send a page, a book identifier or anything else anywhere; the OCR engine is
-  bundled rather than fetched, and there is no other network code
+- upload captured pages or OCR text. The OCR engine is
+  bundled rather than fetched. The filename builder reads library metadata
+  from the signed-in reader on the same Amazon domain
 
 So it is a screen capture tool with a page-turner and a PDF writer attached, not a
 DRM tool. That distinction is the whole design, not a disclaimer.

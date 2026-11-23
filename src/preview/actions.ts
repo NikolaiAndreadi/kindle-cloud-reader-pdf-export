@@ -1,8 +1,9 @@
-import { defaultFileName, saveCachedPdf } from '../pdf/export.ts';
+import { saveCachedPdf } from '../pdf/export.ts';
 import { DEFAULT_PAPER, isPaperName } from '../pdf/paper.ts';
 import { scanRunning } from '../shared/scanning.ts';
-import { clearBook, loadFileName, loadPaper, saveFileName, savePaper } from '../shared/storage.ts';
+import { clearBook, loadPaper, savePaper } from '../shared/storage.ts';
 import { EMPTY_TEXT, message, plural, ui } from './elements.ts';
+import { bindNaming } from './naming.ts';
 import type { PreviewGrid } from './grid.ts';
 
 /** How long "Clear this book" is held before it fires. */
@@ -17,6 +18,7 @@ const HOLD_MS = 2000;
 export class BookActions {
   private readonly book: string;
   private readonly grid: PreviewGrid;
+  private readonly exportName: () => Promise<string>;
   private saving = false;
   private ocrBusy = false;
 
@@ -35,15 +37,7 @@ export class BookActions {
       if (isPaperName(ui.paper.value)) void savePaper(ui.paper.value);
     });
 
-    ui.fileName.placeholder = defaultFileName(book, new Date().toISOString().slice(0, 10));
-    let nameEdited = false;
-    void loadFileName(book).then((name) => {
-      if (!nameEdited) ui.fileName.value = name;
-    });
-    ui.fileName.addEventListener('input', () => {
-      nameEdited = true;
-      void saveFileName(book, ui.fileName.value).catch((error) => grid.showError(error));
-    });
+    this.exportName = bindNaming(book, (error) => grid.showError(error));
 
     // An export interrupted halfway leaves no file and no sign of why.
     addEventListener('beforeunload', (event) => {
@@ -90,7 +84,7 @@ export class BookActions {
     this.describe();
     try {
       const paper = isPaperName(ui.paper.value) ? ui.paper.value : DEFAULT_PAPER;
-      const fileName = ui.fileName.value;
+      const fileName = await this.exportName();
       const result = await saveCachedPdf(this.book, { paper, mode, fileName }, (text) => {
         ui.saveStatus.textContent = text;
       });

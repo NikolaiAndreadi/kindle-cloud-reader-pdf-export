@@ -225,6 +225,34 @@
     return [];
   }
 
+  // src/content/library.ts
+  async function lookupBookNames(asin) {
+    const empty = { title: "", author: "" };
+    if (!/^[a-z0-9]{10}$/i.test(asin)) return empty;
+    const params = new URLSearchParams({ query: "", libraryType: "BOOKS", sortType: "recency", querySize: "50" });
+    const signal = AbortSignal.timeout(6e3);
+    const seen = /* @__PURE__ */ new Set();
+    do {
+      const response = await fetch(`/kindle-library/search?${params}`, { signal, credentials: "same-origin" });
+      if (!response.ok) return empty;
+      const data = await response.json();
+      if (!Array.isArray(data?.itemsList)) return empty;
+      const item = data.itemsList.find((entry) => entry?.asin === asin);
+      if (item) {
+        const authors = Array.isArray(item.authors) ? item.authors : [item.authors];
+        return {
+          title: typeof item.title === "string" ? item.title.trim() : "",
+          author: authors.filter((v) => typeof v === "string").flatMap((name) => name.split(":")).map((name) => name.trim()).filter(Boolean).join(", ")
+        };
+      }
+      const next = data.paginationToken;
+      if (typeof next !== "string" || !next || seen.has(next)) return empty;
+      seen.add(next);
+      params.set("paginationToken", next);
+    } while (!signal.aborted);
+    return empty;
+  }
+
   // src/content/notice.ts
   var NOTICE_ID = "personal-reader-export-status";
   var NOTICE_MS = 5e3;
@@ -889,6 +917,13 @@
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     const book = bookId();
     switch (request.action) {
+      case "bookNames":
+        if (request.asin !== book) {
+          sendResponse({ error: "The open book changed." });
+          return false;
+        }
+        lookupBookNames(book).then(sendResponse, () => sendResponse({ title: "", author: "" }));
+        return true;
       case "startScan":
         startScan(book, request.options).then(
           sendResponse,

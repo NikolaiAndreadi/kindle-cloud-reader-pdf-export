@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Personal Cloud Reader Export",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Export rendered pages from books you own in Kindle Cloud Reader to PDF.",
   "permissions": [
     "storage",
