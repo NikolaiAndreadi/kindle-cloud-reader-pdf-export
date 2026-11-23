@@ -3,6 +3,8 @@ import {
   claimScanLock, releaseScanLock, removeTabScanLocks
 } from '../shared/scan-lock.ts';
 
+import { clearAllBooks } from '../shared/storage.ts';
+
 /**
  * Every lock change is a read-modify-write against session storage, so they run
  * one at a time. A worker restart empties this queue but not the storage, which
@@ -35,8 +37,24 @@ function isScanLockRequest(value: unknown): value is ScanLockRequest {
 chrome.runtime.onMessage.addListener((
   request: ScanLockRequest | unknown,
   sender: chrome.runtime.MessageSender,
-  sendResponse: (reply: ScanLockReply) => void
+  sendResponse: (reply: ScanLockReply | { cleared: boolean } | { error: string }) => void
 ): boolean => {
+  if (sender.url === chrome.runtime.getURL('popup.html') &&
+      (request as { action?: string } | null)?.action === 'clearAllBooks') {
+    void serial(async () => {
+      if (Object.keys(await loadLocks()).length) throw new Error('Stop all scans before deleting cached books.');
+      const cleared = await navigator.locks.request('book-cache', { ifAvailable: true }, async (lock) => {
+        if (!lock) throw new Error('Stop OCR before deleting cached books.');
+        return clearAllBooks();
+      });
+      if (cleared) {
+        // Refresh any open previews. There may be no listening preview tab.
+        await chrome.runtime.sendMessage({ action: 'booksCleared' }).catch(() => {});
+      }
+      sendResponse({ cleared });
+    }).catch((error: Error) => sendResponse({ error: error.message }));
+    return true;
+  }
   if (!isScanLockRequest(request)) return false;
   const tabId = sender.tab?.id;
   if (tabId === undefined) {

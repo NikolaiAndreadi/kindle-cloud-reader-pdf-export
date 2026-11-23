@@ -1,12 +1,10 @@
+import { bindHoldToDelete } from '../shared/hold-to-delete.ts';
 import { defaultFileName, saveCachedPdf } from '../pdf/export.ts';
 import { DEFAULT_PAPER, isPaperName } from '../pdf/paper.ts';
 import { scanRunning } from '../shared/scanning.ts';
 import { clearBook, loadFileName, loadPaper, saveFileName, savePaper } from '../shared/storage.ts';
-import { EMPTY_TEXT, message, plural, ui } from './elements.ts';
+import { message, plural, ui } from './elements.ts';
 import type { PreviewGrid } from './grid.ts';
-
-/** How long "Clear this book" is held before it fires. */
-const HOLD_MS = 2000;
 
 /**
  * Writing the PDF and clearing the book both act on the whole cache, so they
@@ -26,7 +24,11 @@ export class BookActions {
 
     ui.save.addEventListener('click', () => void this.save('scan'));
     ui.saveText.addEventListener('click', () => void this.save('text'));
-    this.bindHold();
+    bindHoldToDelete(ui.clear, () => {
+      void this.clear().catch((error) => {
+        ui.saveStatus.textContent = `Clear failed: ${message(error)}`;
+      });
+    });
 
     void loadPaper().then((paper) => {
       ui.paper.value = paper;
@@ -117,58 +119,6 @@ export class BookActions {
     // The same empty state the page shows for a book with nothing in it: the
     // grid going empty is the confirmation, and a count of what was just
     // deliberately deleted is not news.
-    this.grid.showMessage(EMPTY_TEXT);
-  }
-
-  /**
-   * Clearing is the only irreversible thing here, so it is held rather than
-   * clicked: a confirm() dialog is dismissed by reflex, and it asks the question
-   * somewhere other than where the action was taken. The button fills as it is
-   * held so the wait reads as progress rather than a dead press.
-   */
-  private bindHold(): void {
-    // The CSS transition reads this back, so the duration is set once here.
-    ui.clear.style.setProperty('--hold-ms', `${HOLD_MS}ms`);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const reset = (): void => {
-      if (timer !== undefined) clearTimeout(timer);
-      timer = undefined;
-      // Dropping the class leaves no transition on the way back, so the bar
-      // empties at once and a cancelled hold never looks like a partial one.
-      ui.clear.classList.remove('holding');
-    };
-
-    const start = (): void => {
-      if (timer !== undefined || ui.clear.disabled) return;
-      ui.clear.classList.add('holding');
-      timer = setTimeout(() => {
-        reset();
-        // A poll may have disabled the button mid-hold, e.g. a scan just started
-        // in the reader tab. Whatever the state says now wins.
-        if (ui.clear.disabled) return;
-        void this.clear().catch((error) => {
-          ui.saveStatus.textContent = `Clear failed: ${message(error)}`;
-        });
-      }, HOLD_MS);
-    };
-
-    // Nothing is said about a hold that was let go: the label already asks for
-    // one, and the bar emptying is the answer.
-    const cancel = reset;
-
-    ui.clear.addEventListener('pointerdown', start);
-    // Sliding off the button is the other half of how people back out of a hold.
-    for (const event of ['pointerup', 'pointerleave', 'pointercancel']) {
-      ui.clear.addEventListener(event, cancel);
-    }
-    // Nothing would end the hold if the window lost focus mid-press.
-    addEventListener('blur', cancel);
-
-    // A button that only responds to pointers cannot be reached by keyboard.
-    ui.clear.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') start();
-    });
-    ui.clear.addEventListener('keyup', cancel);
+    this.grid.showEmpty();
   }
 }

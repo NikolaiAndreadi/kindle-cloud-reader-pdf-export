@@ -1,5 +1,39 @@
 "use strict";
 (() => {
+  // src/shared/hold-to-delete.ts
+  var HOLD_MS = 2e3;
+  function bindHoldToDelete(button, remove) {
+    button.style.setProperty("--hold-ms", `${HOLD_MS}ms`);
+    let timer;
+    function reset() {
+      clearTimeout(timer);
+      timer = void 0;
+      button.classList.remove("holding");
+    }
+    function start() {
+      if (timer !== void 0 || button.disabled) return;
+      button.classList.add("holding");
+      timer = setTimeout(() => {
+        reset();
+        if (!button.disabled) remove();
+      }, HOLD_MS);
+    }
+    button.addEventListener("pointerdown", (event) => {
+      if (event.isPrimary && event.button === 0) start();
+    });
+    for (const event of ["pointerup", "pointerleave", "pointercancel", "blur"]) {
+      button.addEventListener(event, reset);
+    }
+    window.addEventListener("blur", reset);
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      if (!event.repeat) start();
+    });
+    button.addEventListener("keyup", reset);
+    return reset;
+  }
+
   // src/shared/reader-hosts.ts
   var READER_HOSTS = [
     "read.amazon.com",
@@ -35,6 +69,9 @@
     }
   }
 
+  // src/shared/scan-lock.ts
+  var SCAN_LOCKS_KEY = "activeScanLocks";
+
   // src/shared/timing.ts
   var DELAY_MIN = 700;
   var DELAY_MAX = 2e3;
@@ -69,6 +106,7 @@
     split: required("#split"),
     bookOptions: required("#bookOptions"),
     bookNote: required("#bookNote"),
+    clearAll: required("#clearAll"),
     open: required("#open"),
     scan: required("#scan"),
     preview: required("#preview")
@@ -182,6 +220,7 @@
       scanning = false;
       apply(null, onReader, describe(error));
     }
+    updateDeleteButton();
   }
   async function perform(run) {
     try {
@@ -207,6 +246,37 @@
     window.close();
     return null;
   });
+  var scanLocksActive;
+  var clearing = false;
+  function updateDeleteButton() {
+    ui.clearAll.disabled = clearing || scanning || scanLocksActive !== false;
+    if (ui.clearAll.disabled) cancelDeleteHold();
+    ui.clearAll.title = scanning || scanLocksActive ? "Stop all scans to delete cached books." : "";
+  }
+  var cancelDeleteHold = bindHoldToDelete(ui.clearAll, () => void perform(async () => {
+    clearing = true;
+    updateDeleteButton();
+    try {
+      const reply = await chrome.runtime.sendMessage({ action: "clearAllBooks" });
+      if (reply?.error) throw new Error(reply.error);
+      if (typeof reply?.cleared !== "boolean") {
+        throw new Error("Deletion could not be confirmed. Reload the extension in chrome://extensions, then try again.");
+      }
+      return reply.cleared ? "Deleted all cached books." : "No cached books to delete.";
+    } finally {
+      clearing = false;
+      updateDeleteButton();
+    }
+  }));
+  chrome.storage.session.onChanged.addListener((changes) => {
+    if (!changes[SCAN_LOCKS_KEY]) return;
+    scanLocksActive = Object.keys(changes[SCAN_LOCKS_KEY].newValue ?? {}).length > 0;
+    updateDeleteButton();
+  });
+  void chrome.storage.session.get(SCAN_LOCKS_KEY).then((stored) => {
+    scanLocksActive ??= Object.keys(stored[SCAN_LOCKS_KEY] ?? {}).length > 0;
+    updateDeleteButton();
+  }).catch((error) => notice(describe(error)));
   onClick(ui.preview, async () => {
     if (!currentBook) return null;
     await chrome.tabs.create({

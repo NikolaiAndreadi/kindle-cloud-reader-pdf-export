@@ -24,6 +24,18 @@
     return changed;
   }
 
+  // src/shared/storage.ts
+  async function storageKeys() {
+    const local = chrome.storage.local;
+    return typeof local.getKeys === "function" ? await local.getKeys() : Object.keys(await local.get(null));
+  }
+  async function clearAllBooks() {
+    const keys = (await storageKeys()).filter((key) => key.startsWith("book:"));
+    if (!keys.length) return false;
+    await chrome.storage.local.remove(keys);
+    return true;
+  }
+
   // src/background/main.ts
   var queue = Promise.resolve();
   function serial(work) {
@@ -43,6 +55,21 @@
     return (request.action === "acquireScanLock" || request.action === "releaseScanLock") && typeof request.book === "string" && typeof request.token === "string";
   }
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (sender.url === chrome.runtime.getURL("popup.html") && request?.action === "clearAllBooks") {
+      void serial(async () => {
+        if (Object.keys(await loadLocks()).length) throw new Error("Stop all scans before deleting cached books.");
+        const cleared = await navigator.locks.request("book-cache", { ifAvailable: true }, async (lock) => {
+          if (!lock) throw new Error("Stop OCR before deleting cached books.");
+          return clearAllBooks();
+        });
+        if (cleared) {
+          await chrome.runtime.sendMessage({ action: "booksCleared" }).catch(() => {
+          });
+        }
+        sendResponse({ cleared });
+      }).catch((error) => sendResponse({ error: error.message }));
+      return true;
+    }
     if (!isScanLockRequest(request)) return false;
     const tabId = sender.tab?.id;
     if (tabId === void 0) {

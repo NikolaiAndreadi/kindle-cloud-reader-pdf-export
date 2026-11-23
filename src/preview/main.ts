@@ -1,7 +1,7 @@
 import { scanRunning } from '../shared/scanning.ts';
 import { loadMeta, pagesInBatches } from '../shared/storage.ts';
 import { BookActions } from './actions.ts';
-import { EMPTY_TEXT, message, ui } from './elements.ts';
+import { message } from './elements.ts';
 import { PreviewGrid, thumbnailUrl } from './grid.ts';
 import { OcrController } from './ocr.ts';
 
@@ -31,7 +31,6 @@ let generation = 0;
 
 async function load(): Promise<void> {
   const mine = ++generation;
-  ui.title.textContent = `Captured pages · ${book}`;
   if (!book) {
     grid.showMessage('No book specified.');
     return;
@@ -40,7 +39,7 @@ async function load(): Promise<void> {
   const meta = await loadMeta(book);
   if (mine !== generation) return;
   if (!meta.captures.length) {
-    grid.showMessage(EMPTY_TEXT);
+    grid.showEmpty();
     return;
   }
 
@@ -91,6 +90,12 @@ function tick(): void {
       watching = false;
     });
 }
+
+chrome.runtime.onMessage.addListener((request, sender) => {
+  if (sender.id === chrome.runtime.id && request?.action === 'booksCleared') {
+    location.reload();
+  }
+});
 
 void load().then(tick, (error) => grid.showMessage(`Could not load this book: ${message(error)}`));
 setInterval(tick, WATCH_MS);

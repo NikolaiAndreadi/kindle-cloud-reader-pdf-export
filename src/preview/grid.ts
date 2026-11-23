@@ -82,6 +82,12 @@ export class PreviewGrid {
     return this.records.filter((capture) => capture.asImage).length;
   }
 
+  showEmpty(): void {
+    const title = `No captured pages · ${this.book}`;
+    ui.title.textContent = document.title = title;
+    this.showMessage(EMPTY_TEXT);
+  }
+
   showMessage(text: string): void {
     this.tiles.clear();
     this.records = [];
@@ -98,6 +104,7 @@ export class PreviewGrid {
   }
 
   setMeta(meta: BookMeta): void {
+    ui.title.textContent = document.title = `Captured pages · ${this.book}`;
     this.records = meta.captures;
     this.total = meta.total;
     this.refresh();
@@ -259,10 +266,11 @@ export class PreviewGrid {
         return;
       }
       const meta = await deleteCapture(this.book, index);
-      this.records = meta.captures;
+      ui.title.textContent = document.title = `Captured pages · ${this.book}`;
+    this.records = meta.captures;
       this.tiles.delete(index);
       figure.remove();
-      if (!this.records.length) this.showMessage(EMPTY_TEXT);
+      if (!this.records.length) this.showEmpty();
       else this.refresh();
     } catch (error) {
       button.disabled = this.editLocked;
@@ -309,7 +317,8 @@ export class PreviewGrid {
       const meta = await setCaptureAsImage(
         this.book, capture.index, capture.fingerprint, wanted
       );
-      this.records = meta.captures;
+      ui.title.textContent = document.title = `Captured pages · ${this.book}`;
+    this.records = meta.captures;
       this.refresh();
     } catch (error) {
       box.checked = !wanted;
@@ -377,6 +386,7 @@ export class PreviewGrid {
       return;
     }
     const meta = await reorderCaptures(this.book, order);
+    ui.title.textContent = document.title = `Captured pages · ${this.book}`;
     this.records = meta.captures;
     this.refresh();
   }

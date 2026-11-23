@@ -50,6 +50,10 @@ advancing. Captured pages are cached per book, so you can stop whenever you like
 and pick up later — a page already captured is never re-encoded, and an identical
 view is never stored twice.
 
+To free space across all books, open the extension popup from any tab and press
+**Hold to delete all cached books** for two seconds. Release early to cancel. This removes captured pages, OCR text,
+and per-book naming details. Downloaded PDFs and global settings are kept.
+
 Everything that acts on the whole book lives behind **See captured pages and save
 PDF**: reordering, deleting single pages, **Page size**, **Add searchable text
 (OCR)**, the two save buttons, and **Clear this book**.

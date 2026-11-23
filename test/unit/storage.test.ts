@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
 import {
-  clearBook, countDuplicates, deleteCapture, emptyMeta, fingerprintCounts, loadMeta, loadOcrBatch,
+  clearAllBooks, clearBook, countDuplicates, deleteCapture, emptyMeta, fingerprintCounts, loadMeta, loadOcrBatch,
   loadPaper, metaKey, nextIndex, ocrKey, ocrKeyParts, pageKey, pagesInBatches, recognisedIndexes,
   reorderCaptures, saveMeta, savePaper, storeOcr, storePage
 } from '../../src/shared/storage.ts';
@@ -46,6 +46,18 @@ const ocr = (index: number, words = 1): StoredOcr => ({
 let data: Map<string, unknown>;
 beforeEach(() => {
   data = fakeStorage();
+});
+
+describe('clearAllBooks', () => {
+  it('removes every book record, including unindexed pages, and preserves global settings', async () => {
+    const settings = ['options', 'paper', 'filenameTemplate'];
+    for (const key of [...settings, metaKey('A'), pageKey('B', 1), ocrKey('C', 2, 'fp'), 'book:D:title']) {
+      data.set(key, 'value');
+    }
+    assert.equal(await clearAllBooks(), true);
+    assert.deepEqual([...data.keys()], settings);
+    assert.equal(await clearAllBooks(), false);
+  });
 });
 
 describe('keys', () => {

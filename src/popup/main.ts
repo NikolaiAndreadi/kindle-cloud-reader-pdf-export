@@ -1,4 +1,6 @@
+import { bindHoldToDelete } from '../shared/hold-to-delete.ts';
 import { READER_HOME, isReaderUrl } from '../shared/reader-hosts.ts';
+import { SCAN_LOCKS_KEY } from '../shared/scan-lock.ts';
 import { clampDelay, clampJitter } from '../shared/timing.ts';
 import { ui } from './elements.ts';
 import { apply, notice, showTiming } from './render.ts';
@@ -69,6 +71,7 @@ async function refreshState(): Promise<void> {
     scanning = false;
     apply(null, onReader, describe(error));
   }
+  updateDeleteButton();
 }
 
 async function perform(run: () => Promise<string | null>): Promise<void> {
@@ -102,6 +105,42 @@ onClick(ui.open, async () => {
   window.close();
   return null;
 });
+
+let scanLocksActive: boolean | undefined;
+let clearing = false;
+
+function updateDeleteButton(): void {
+  ui.clearAll.disabled = clearing || scanning || scanLocksActive !== false;
+  if (ui.clearAll.disabled) cancelDeleteHold();
+  ui.clearAll.title = scanning || scanLocksActive ? 'Stop all scans to delete cached books.' : '';
+}
+
+const cancelDeleteHold = bindHoldToDelete(ui.clearAll, () => void perform(async () => {
+  clearing = true;
+  updateDeleteButton();
+  try {
+    const reply = await chrome.runtime.sendMessage({ action: 'clearAllBooks' });
+    if (reply?.error) throw new Error(reply.error);
+    if (typeof reply?.cleared !== 'boolean') {
+      throw new Error('Deletion could not be confirmed. Reload the extension in chrome://extensions, then try again.');
+    }
+    return reply.cleared ? 'Deleted all cached books.' : 'No cached books to delete.';
+  } finally {
+    clearing = false;
+    updateDeleteButton();
+  }
+}));
+
+chrome.storage.session.onChanged.addListener((changes) => {
+  if (!changes[SCAN_LOCKS_KEY]) return;
+  scanLocksActive = Object.keys(changes[SCAN_LOCKS_KEY].newValue ?? {}).length > 0;
+  updateDeleteButton();
+});
+void chrome.storage.session.get(SCAN_LOCKS_KEY).then((stored) => {
+  // A change delivered while the initial read was in flight is newer.
+  scanLocksActive ??= Object.keys(stored[SCAN_LOCKS_KEY] ?? {}).length > 0;
+  updateDeleteButton();
+}).catch((error) => notice(describe(error)));
 
 onClick(ui.preview, async () => {
   if (!currentBook) return null;

@@ -329,14 +329,26 @@ export async function deleteCapture(book: string, index: number): Promise<BookMe
   return meta;
 }
 
-export async function clearBook(book: string): Promise<number> {
+async function storageKeys(): Promise<string[]> {
   const local = chrome.storage.local;
   // getKeys landed after the extension's minimum Chrome version. get(null) is
   // the compatible fallback; clearing is deliberately the only path that may
   // enumerate storage so interrupted, unindexed page writes can be removed.
-  const allKeys = typeof local.getKeys === 'function'
+  return typeof local.getKeys === 'function'
     ? await local.getKeys()
     : Object.keys(await local.get(null));
+}
+
+export async function clearAllBooks(): Promise<boolean> {
+  const keys = (await storageKeys()).filter((key) => key.startsWith('book:'));
+  if (!keys.length) return false;
+  await chrome.storage.local.remove(keys);
+  return true;
+}
+
+export async function clearBook(book: string): Promise<number> {
+  const local = chrome.storage.local;
+  const allKeys = await storageKeys();
   const pagePrefix = `book:${book}:page:`;
   const ocrPrefix = `book:${book}:ocr:`;
   const pages = allKeys.filter((key) => key.startsWith(pagePrefix));

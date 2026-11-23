@@ -252,9 +252,13 @@
     await local.remove([pageKey(book2, index), ...stale]);
     return meta;
   }
+  async function storageKeys() {
+    const local = chrome.storage.local;
+    return typeof local.getKeys === "function" ? await local.getKeys() : Object.keys(await local.get(null));
+  }
   async function clearBook(book2) {
     const local = chrome.storage.local;
-    const allKeys = typeof local.getKeys === "function" ? await local.getKeys() : Object.keys(await local.get(null));
+    const allKeys = await storageKeys();
     const pagePrefix = `book:${book2}:page:`;
     const ocrPrefix = `book:${book2}:ocr:`;
     const pages = allKeys.filter((key) => key.startsWith(pagePrefix));
@@ -268,6 +272,40 @@
       if (capture.fingerprint) counts.set(capture.fingerprint, (counts.get(capture.fingerprint) || 0) + 1);
     }
     return counts;
+  }
+
+  // src/shared/hold-to-delete.ts
+  var HOLD_MS = 2e3;
+  function bindHoldToDelete(button, remove) {
+    button.style.setProperty("--hold-ms", `${HOLD_MS}ms`);
+    let timer;
+    function reset() {
+      clearTimeout(timer);
+      timer = void 0;
+      button.classList.remove("holding");
+    }
+    function start() {
+      if (timer !== void 0 || button.disabled) return;
+      button.classList.add("holding");
+      timer = setTimeout(() => {
+        reset();
+        if (!button.disabled) remove();
+      }, HOLD_MS);
+    }
+    button.addEventListener("pointerdown", (event) => {
+      if (event.isPrimary && event.button === 0) start();
+    });
+    for (const event of ["pointerup", "pointerleave", "pointercancel", "blur"]) {
+      button.addEventListener(event, reset);
+    }
+    window.addEventListener("blur", reset);
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      if (!event.repeat) start();
+    });
+    button.addEventListener("keyup", reset);
+    return reset;
   }
 
   // src/shared/png.ts
@@ -960,7 +998,6 @@ ${xref}
   }
 
   // src/preview/actions.ts
-  var HOLD_MS = 2e3;
   var BookActions = class {
     book;
     grid;
@@ -971,7 +1008,11 @@ ${xref}
       this.grid = grid2;
       ui.save.addEventListener("click", () => void this.save("scan"));
       ui.saveText.addEventListener("click", () => void this.save("text"));
-      this.bindHold();
+      bindHoldToDelete(ui.clear, () => {
+        void this.clear().catch((error) => {
+          ui.saveStatus.textContent = `Clear failed: ${message(error)}`;
+        });
+      });
       void loadPaper().then((paper) => {
         ui.paper.value = paper;
       });
@@ -1039,43 +1080,7 @@ ${xref}
         return;
       }
       await clearBook(this.book);
-      this.grid.showMessage(EMPTY_TEXT);
-    }
-    /**
-     * Clearing is the only irreversible thing here, so it is held rather than
-     * clicked: a confirm() dialog is dismissed by reflex, and it asks the question
-     * somewhere other than where the action was taken. The button fills as it is
-     * held so the wait reads as progress rather than a dead press.
-     */
-    bindHold() {
-      ui.clear.style.setProperty("--hold-ms", `${HOLD_MS}ms`);
-      let timer;
-      const reset = () => {
-        if (timer !== void 0) clearTimeout(timer);
-        timer = void 0;
-        ui.clear.classList.remove("holding");
-      };
-      const start = () => {
-        if (timer !== void 0 || ui.clear.disabled) return;
-        ui.clear.classList.add("holding");
-        timer = setTimeout(() => {
-          reset();
-          if (ui.clear.disabled) return;
-          void this.clear().catch((error) => {
-            ui.saveStatus.textContent = `Clear failed: ${message(error)}`;
-          });
-        }, HOLD_MS);
-      };
-      const cancel = reset;
-      ui.clear.addEventListener("pointerdown", start);
-      for (const event of ["pointerup", "pointerleave", "pointercancel"]) {
-        ui.clear.addEventListener(event, cancel);
-      }
-      addEventListener("blur", cancel);
-      ui.clear.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") start();
-      });
-      ui.clear.addEventListener("keyup", cancel);
+      this.grid.showEmpty();
     }
   };
 
@@ -1133,6 +1138,11 @@ ${xref}
     imageCount() {
       return this.records.filter((capture) => capture.asImage).length;
     }
+    showEmpty() {
+      const title = `No captured pages · ${this.book}`;
+      ui.title.textContent = document.title = title;
+      this.showMessage(EMPTY_TEXT);
+    }
     showMessage(text) {
       this.tiles.clear();
       this.records = [];
@@ -1148,6 +1158,7 @@ ${xref}
       ui.summary.textContent = message(error);
     }
     setMeta(meta) {
+      ui.title.textContent = document.title = `Captured pages · ${this.book}`;
       this.records = meta.captures;
       this.total = meta.total;
       this.refresh();
@@ -1283,10 +1294,11 @@ ${xref}
           return;
         }
         const meta = await deleteCapture(this.book, index);
+        ui.title.textContent = document.title = `Captured pages · ${this.book}`;
         this.records = meta.captures;
         this.tiles.delete(index);
         figure.remove();
-        if (!this.records.length) this.showMessage(EMPTY_TEXT);
+        if (!this.records.length) this.showEmpty();
         else this.refresh();
       } catch (error) {
         button.disabled = this.editLocked;
@@ -1329,6 +1341,7 @@ ${xref}
           capture.fingerprint,
           wanted
         );
+        ui.title.textContent = document.title = `Captured pages · ${this.book}`;
         this.records = meta.captures;
         this.refresh();
       } catch (error) {
@@ -1390,6 +1403,7 @@ ${xref}
         return;
       }
       const meta = await reorderCaptures(this.book, order);
+      ui.title.textContent = document.title = `Captured pages · ${this.book}`;
       this.records = meta.captures;
       this.refresh();
     }
@@ -1724,13 +1738,13 @@ ${xref}
       ui.ocrStatus.textContent = "Starting…";
       let outcome = "";
       try {
-        const result = await runOcr(this.book, {
+        const result = await navigator.locks.request("book-cache", { mode: "shared" }, () => runOcr(this.book, {
           onProgress: (progress) => {
             if (progress.index !== void 0) this.grid.markRecognised(progress.index);
             ui.ocrStatus.textContent = progress.status ? `${progress.status}…` : `Reading page ${progress.done} of ${progress.total}${this.stopRequested ? " · stopping after this page" : ""}`;
           },
           shouldStop: () => this.stopRequested
-        });
+        }));
         const skipped = result.skipped ? `, ${plural2(result.skipped, "page")} skipped` : "";
         outcome = result.stopped ? `Stopped after ${plural2(result.recognised, "page")}${skipped}. Start again to carry on.` : `Finished — ${plural2(result.recognised, "page")} recognised${skipped}.`;
       } catch (error) {
@@ -1764,7 +1778,6 @@ ${xref}
   var generation = 0;
   async function load() {
     const mine = ++generation;
-    ui.title.textContent = `Captured pages · ${book}`;
     if (!book) {
       grid.showMessage("No book specified.");
       return;
@@ -1772,7 +1785,7 @@ ${xref}
     const meta = await loadMeta(book);
     if (mine !== generation) return;
     if (!meta.captures.length) {
-      grid.showMessage(EMPTY_TEXT);
+      grid.showEmpty();
       return;
     }
     grid.setMeta(meta);
@@ -1806,6 +1819,11 @@ ${xref}
       watching = false;
     });
   }
+  chrome.runtime.onMessage.addListener((request, sender) => {
+    if (sender.id === chrome.runtime.id && request?.action === "booksCleared") {
+      location.reload();
+    }
+  });
   void load().then(tick, (error) => grid.showMessage(`Could not load this book: ${message(error)}`));
   setInterval(tick, WATCH_MS);
 })();

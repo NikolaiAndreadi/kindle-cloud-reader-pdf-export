@@ -60,7 +60,7 @@ export class OcrController {
 
     let outcome = '';
     try {
-      const result = await runOcr(this.book, {
+      const result = await navigator.locks.request('book-cache', { mode: 'shared' }, () => runOcr(this.book, {
         onProgress: (progress) => {
           if (progress.index !== undefined) this.grid.markRecognised(progress.index);
           ui.ocrStatus.textContent = progress.status
@@ -69,7 +69,7 @@ export class OcrController {
               this.stopRequested ? ' · stopping after this page' : ''}`;
         },
         shouldStop: () => this.stopRequested
-      });
+      }));
       const skipped = result.skipped ? `, ${plural(result.skipped, 'page')} skipped` : '';
       outcome = result.stopped
         ? `Stopped after ${plural(result.recognised, 'page')}${skipped}. Start again to carry on.`

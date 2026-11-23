@@ -16,6 +16,7 @@ export const ui = {
   split: required<HTMLInputElement>('#split'),
   bookOptions: required<HTMLDivElement>('#bookOptions'),
   bookNote: required<HTMLParagraphElement>('#bookNote'),
+  clearAll: required<HTMLButtonElement>('#clearAll'),
   open: required<HTMLButtonElement>('#open'),
   scan: required<HTMLButtonElement>('#scan'),
   preview: required<HTMLButtonElement>('#preview')

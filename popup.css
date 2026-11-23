@@ -17,6 +17,19 @@ input[type="range"] { width: 100%; margin: 0; accent-color: #ff9900; }
 button { border: 0; border-radius: 6px; background: #ff9900; color: #161616; font-weight: 650; cursor: pointer; }
 button.secondary { background: #7773; color: inherit; }
 
+#clearAll {
+  --delete-color: #b3261e;
+  display: block; width: 100%; margin-top: 14px; user-select: none;
+  color: var(--delete-color); border: 1px solid currentColor; background-color: transparent;
+  background-image: linear-gradient(var(--delete-fill, #b3261e33), var(--delete-fill, #b3261e33));
+  background-repeat: no-repeat; background-size: 0 100%;
+}
+@media (prefers-color-scheme: dark) {
+  #clearAll { --delete-color: #ff938a; --delete-fill: #ff938a33; }
+}
+#clearAll:disabled { opacity: .5; cursor: not-allowed; }
+#clearAll.holding { background-size: 100% 100%; transition: background-size var(--hold-ms) linear; }
+
 .cache { padding: 8px; border-radius: 6px; background: #7772; }
 .hint { opacity: .7; font-size: 12px; }
 /* Fenced off by a rule top and bottom: everything else in the popup can be

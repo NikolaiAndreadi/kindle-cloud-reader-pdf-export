@@ -10,10 +10,6 @@
     <main>
       <h1>Cloud Reader Export</h1>
       <p id="status">Open a book and start scanning.</p>
-      <!-- The only control that makes sense away from the reader, so it sits
-           outside #controls: exactly one of the two is ever shown. Both start
-           hidden so the first paint cannot show the wrong half for a frame —
-           the status line above carries the popup until the state arrives. -->
       <button id="open" class="secondary" hidden>Open read.amazon.com</button>
       <div id="controls" hidden>
         <label class="slider">
@@ -60,6 +56,7 @@
         <p id="cache" class="cache">Checking saved pages…</p>
         <p class="hint">Captured pages remain stored for this book. Reopen it later and resume without losing earlier pages.</p>
       </div>
+      <button id="clearAll" disabled type="button" class="secondary">Hold to delete all cached books</button>
     </main>
     <script src="popup.js"></script>
   </body>
